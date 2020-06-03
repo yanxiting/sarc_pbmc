@@ -1,0 +1,1142 @@
+---
+title: "Preprocessing of the GRADS SARC PBMC data"
+author: "Xiting Yan"
+date: "08/16/2019"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+
+knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+home.dir<-"/home/yanxiting/driver_Grace"
+source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+```
+
+
+# Background
+This is the rmarkdown for the data preprocessing of the bulk RNAseq of the PBMC from the GRADS sarcoidosis patients.
+
+# Method
+We preprocessed the data with the following steps:
+
+1. $\color{red}{\text{Calculating the maximum read length.}}$
+2. $\color{red}{\text{Generating the STAR index file using the read length calculated from the previous step.}}$
+3. $\color{red}{\text{Map the reads to UCSC hg38 using the two-step mapping strategy using STAR and bowtie2 recommended by the company.}}$
+4. $\color{red}{\text{Calculate the FPKMs and the raw counts.}}$
+5. $\color{red}{\text{Extract the corresponding clinical features.}}$
+
+## 1-3. Mapping
+We map the reads using the two-step mapping strategy with STAR and bowtie2. The codes that we used are as follows.
+
+
+## 4. FPKM and raw count matrix generation
+
+### FPKM
+We use the Cufflinks to calculate the FPKM matrix. Since we identified 12 samples that got mislabelled, we generate the FPKM matrices for the baseline, 6-month visit, and both visits altogether, separately. For the files with `*_noCorrection_*.txt` in the names, they also include those 12 samples for correction, which has some BAL samples. For the files with `*_Corrected_*.txt` in the names, they do not have any BAL samples. The FPKM matrices are saved under `` `r file.path(output.dir,"data")` ``
+```{r eval=FALSE}
+# We only need to run this once.
+################################################
+# create the FPKM matrix for the STAR+bowtie2 results for all samples, baseline visits and 6 month visits separately.
+# These samples also include those samples for ID correction.
+baseline.cufflinks.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/results_cufflinks2_STARBowtie2_hg38")
+six.cufflinks.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/6mon/results_cufflinks2_STARBowtie2_hg38")
+output.subdir<-file.path(output.dir,"data")
+
+# get the names of all the cufflinks samples
+baseline.filenames<-list.files(baseline.cufflinks.dir)
+baseline.filenames<-baseline.filenames[grep("_out",baseline.filenames)]
+
+six.filenames<-list.files(six.cufflinks.dir)
+six.filenames<-six.filenames[grep("_out",six.filenames)]
+
+# for the baseline visits only
+filenames<-baseline.filenames
+cufflinks.dir<-baseline.cufflinks.dir
+anno.matrix<-character()
+fpkm.matrix<-numeric()
+
+for(i in 1:length(filenames)){
+
+temp<-read.table(file.path(cufflinks.dir,filenames[i],"genes.fpkm_tracking"),check.names=F,header=TRUE,sep="\t")
+rownames(temp)<-paste(as.matrix(temp)[,"tracking_id"],"_",as.matrix(temp)[,"tss_id"],sep="")
+
+if(i==1){
+temp.names<-rownames(temp)
+anno.matrix<-as.matrix(temp)[,1:9]
+}else{
+temp<-temp[temp.names,]
+}
+
+fpkm.matrix<-cbind(fpkm.matrix,temp[,"FPKM"])
+}
+
+sample.names<-unname(sapply(filenames,my.element.extract,splitchar="_out",index=1))
+temp1<-unname(sapply(sample.names,my.element.extract,splitchar="_",index=1))
+temp2<-unname(sapply(sample.names,my.element.extract,splitchar="_",index=3))
+colnames(fpkm.matrix)<-paste(temp1,"_",temp2,sep="")
+rownames(fpkm.matrix)<-temp.names
+
+output.filepath<-file.path(output.subdir,"FPKM_matrix_hg38_noCorrection_baseline.txt")
+cmd.out<-cbind(anno.matrix,fpkm.matrix)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+baseline.fpkm.matrix<-cmd.out
+
+
+# for the 6 month visits only
+filenames<-six.filenames
+cufflinks.dir<-six.cufflinks.dir
+anno.matrix<-character()
+fpkm.matrix<-numeric()
+
+for(i in 1:length(filenames)){
+
+temp<-read.table(file.path(cufflinks.dir,filenames[i],"genes.fpkm_tracking"),check.names=F,header=TRUE,sep="\t")
+rownames(temp)<-paste(as.matrix(temp)[,"tracking_id"],"_",as.matrix(temp)[,"tss_id"],sep="")
+
+if(i==1){
+temp.names<-rownames(temp)
+anno.matrix<-as.matrix(temp)[,1:9]
+}else{
+temp<-temp[temp.names,]
+}
+
+fpkm.matrix<-cbind(fpkm.matrix,temp[,"FPKM"])
+}
+
+sample.names<-unname(sapply(filenames,my.element.extract,splitchar="_out",index=1))
+temp1<-unname(sapply(sample.names,my.element.extract,splitchar="_",index=1))
+temp2<-unname(sapply(sample.names,my.element.extract,splitchar="_",index=3))
+colnames(fpkm.matrix)<-paste(temp1,"_",temp2,sep="")
+rownames(fpkm.matrix)<-temp.names
+
+output.filepath<-file.path(output.subdir,"FPKM_matrix_hg38_noCorrection_6month.txt")
+cmd.out<-cbind(anno.matrix,fpkm.matrix)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+six.fpkm.matrix<-cmd.out
+
+# merge all the baseline and 6 month visits together
+temp1<-rownames(baseline.fpkm.matrix)
+temp2<-rownames(six.fpkm.matrix)
+six.fpkm.matrix<-six.fpkm.matrix[temp1,]
+
+cmd.out<-cbind(baseline.fpkm.matrix[,10:ncol(baseline.fpkm.matrix)],six.fpkm.matrix[,10:ncol(six.fpkm.matrix)])
+cmd.out<-cbind(baseline.fpkm.matrix[,1:9],cmd.out)
+
+output.filepath<-file.path(output.subdir,"FPKM_matrix_hg38_noCorrection_allSamples.txt")
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+############################################################################
+# do the correction for the 12 mislabelled samples and output the FPKM matrix again
+# get rid of the BAL samples that were included for the ID correction
+cmd.out<-read.table(file.path(output.subdir,"FPKM_matrix_hg38_noCorrection_allSamples.txt"),sep="\t",header=T,check.names=F,stringsAsFactors = F)
+
+idcorrection.matrix<-matrix(c(
+"06S7133_005","02S7045_011",
+"03S7224_006","05S7101_012",
+"03B9320_007","06B9128_013",
+"03B9219_008","01B9033_014",
+"06B9221_009","04B9250_015",
+"03S7071_010","03B9078_016"),ncol=2,byrow=T)
+
+data.matrix<-cmd.out
+data.matrix<-data.matrix[,10:ncol(data.matrix)]
+
+# switch the IDs
+for(i in 1:nrow(idcorrection.matrix)){
+temp.matrix<-data.matrix[,idcorrection.matrix[i,]]
+temp.matrix<-temp.matrix[,c(2,1)]
+data.matrix[,idcorrection.matrix[i,]]<-temp.matrix
+}
+
+# get rid of the BAL samples
+temp.tissue<-substr(colnames(data.matrix),3,3)
+data.matrix<-data.matrix[,temp.tissue=="S"]
+
+# output the corrected all samples
+output.filepath<-file.path(output.subdir,"FPKM_matrix_hg38_Corrected_allSamples.txt")
+temp.cmd.out<-cbind(cmd.out[,1:9],data.matrix)
+write.table(data.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+# output the baseline visits
+output.filepath<-file.path(output.subdir,"FPKM_matrix_hg38_Corrected_baseline.txt")
+temp.names<-colnames(baseline.fpkm.matrix)[10:ncol(baseline.fpkm.matrix)]
+temp.names<-temp.names[temp.names%in%colnames(data.matrix)]
+temp.matrix<-data.matrix[,temp.names]
+temp.cmd.out<-cbind(cmd.out[,1:9],temp.matrix)
+write.table(temp.cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+n1<-ncol(temp.matrix)
+# output the 6 month visits
+output.filepath<-file.path(output.subdir,"FPKM_matrix_hg38_Corrected_6month.txt")
+temp.names<-colnames(six.fpkm.matrix)[10:ncol(six.fpkm.matrix)]
+temp.names<-temp.names[temp.names%in%colnames(data.matrix)]
+temp.matrix<-data.matrix[,temp.names]
+temp.cmd.out<-cbind(cmd.out[,1:9],temp.matrix)
+write.table(temp.cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+n2<-ncol(temp.matrix)
+
+cat("There are in total ",n1," baseline visits and ",n2," 6-month visits.\n")
+```
+
+### Raw counts
+We generate the raw counts by running the following jobs on hpc.
+```{r 0_rawcounts_hg38_persample, eval=FALSE}
+##############################################################################
+# Generate the raw counts for each sample separately
+# This file was saved as ~/Rprogram/GRADS_PBMC/DataPreprocessing/0_rawcounts_hg38_persample.R on grace
+library(Rsubread)
+library(edgeR)
+source("~/Rprogram/my_functions.R")
+
+#output.dir<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_baseline_hg38/results_rawcounts_hg38"
+#tophat.dir<-"/home/fas/kaminski/xy48/scratch/GRADS/results_STAR_hg38"
+#j=1
+
+###############################
+# load in the IDs that need to be switched with each other
+dir.list<-list.files(tophat.dir)
+dir.id<-unname(sapply(dir.list,my.element.extract,splitchar="_",index=1))
+dir.barcode<-unname(sapply(dir.list,my.element.extract,splitchar="_",index=3))
+dir.samplenames<-paste(dir.id,"_",dir.barcode,sep="")
+count.table<-numeric()
+
+result.dirs<-dir.list
+#for(j in 1:length(result.dirs)){
+
+kit.id<-my.element.extract(result.dirs[j],splitchar="_",index=1)
+barcode.id<-my.element.extract(result.dirs[j],splitchar="_",index=3)
+sample.name<-paste(kit.id,"_",barcode.id,sep="")
+
+bam.filepath<-file.path(tophat.dir,result.dirs[j],"Final.STARBowtie2.bam")
+
+temp<-featureCounts(bam.filepath,annot.inbuilt="hg38",annot.ext="/home/ysm/xiting_yan/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-2015-08-14-08-18-15/Genes/genes.gtf",isGTFAnnotationFile=T,GTF.featureType="exon",GTF.attrType="gene_id",useMetaFeatures=T,allowMultiOverlap=T,nthreads=4,countMultiMappingReads=T)
+
+anno.matrix<-temp[[2]]
+count.table<-cbind(count.table,temp[[1]])
+
+#cell.names<-unname(sapply(result.dirs,my.element.extract,splitchar="_",index=1))
+#cell.names2<-unname(sapply(result.dirs,my.element.extract,splitchar="_",index=3))
+
+colnames(count.table)<-sample.name
+
+# output the count.table
+#output.filepath<-file.path("..","edgeR",paste(sample.name,"_counttable.txt",sep=""))
+#output.filepath<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_baseline_hg38/data/rawcounts_corrected_all.txt"
+cmd.out<-cbind(anno.matrix,count.table)
+output.filepath<-file.path(output.dir,paste(sample.name,"_rawcounts.txt",sep=""))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+# output the annotation matrix
+#output.filepath<-file.path("..","edgeR",paste(sample.name,"_annotation_matrix.txt",sep=""))
+#output.filepath<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_baseline_hg38/data/annotation_matrix_corrected_all.txt"
+#write.table(anno.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+
+```
+
+```{r 0_rawcounts_hg38,eval=FALSE}
+########################################################################
+# These codes generate the sh files to run 0_rawcounts_hg38_persample.R on all samples under the given folder
+# These codes need to be run on the yale grace hpc
+
+# 0. for each sample, generate the raw count separately
+source("/home/ysm/xiting_yan/xy48/Rprogram/my_functions.R")
+
+r.filepath<-"/home/ysm/xiting_yan/xy48/Rprogram/GRADS_PBMC/DataPreprocessing/0_rawcounts_hg38_persample.R"
+tophat.dir<-"/home/ysm/xiting_yan/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/6mon/results_STAR_hg38"
+work.dir<-"/home/ysm/xiting_yan/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/6mon"
+
+script.dir<-file.path(work.dir,"scripts_rawcounts_hg38")
+output.dir<-file.path(work.dir,"results_rawcounts_hg38")
+
+if(file.exists(script.dir)==F){
+dir.create(script.dir)
+}
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)
+}
+
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+filenames<-list.files(tophat.dir)
+temp1<-unname(sapply(filenames,my.element.extract,splitchar="_",index=1))
+temp2<-unname(sapply(filenames,my.element.extract,splitchar="_",index=3))
+
+sample.names<-paste(temp1,"_",temp2,sep="")
+
+for(i in 1:length(sample.names)){
+
+script.filepath<-file.path(script.dir,paste(sample.names[i],".sh",sep=""))
+
+# generate the header for slurm
+cmd.out<-"#!/bin/bash\n#SBATCH --partition=day,pi_kaminski,week\n#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1\n#SBATCH --mem=4000\n#SBATCH --time=24:00:00\n#SBATCH --mail-type=NONE\n"
+cmd.out<-paste(cmd.out,"#SBATCH --job-name=",sample.names[i],"\n",sep="")
+cmd.out<-paste(cmd.out,"#SBATCH --error=",script.filepath,".e%J\n",sep="")
+cmd.out<-paste(cmd.out,"#SBATCH --output=",script.filepath,".o%J\n",sep="")
+cmd.out<-paste(cmd.out,"module restore singler\n",sep="")
+cmd.out<-paste(cmd.out,"R --vanilla<<EOF\n",sep="")
+cmd.out<-paste(cmd.out,"tophat.dir<-\"",tophat.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"j=",i,"\n",sep="")
+cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
+cmd.out<-paste(cmd.out,"EOF\n",sep="")
+
+cat(cmd.out,file=script.filepath,append=F)
+cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+
+system(paste("chmod 700 ",script.filepath,sep=""))
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+
+
+```
+
+Then we merge the raw counts into one single matrix using the following codes.
+```{r eval=FALSE}
+# We only need to run these codes once
+######################################################
+# These codes can be run on the laptop with the grace hpc hard disk mounted.
+baseline.cufflinks.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/results_rawcounts_hg38")
+six.cufflinks.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/6mon/results_rawcounts_hg38")
+output.subdir<-file.path(output.dir,"data")
+
+# get the names of all the cufflinks samples
+baseline.filenames<-list.files(baseline.cufflinks.dir)
+baseline.filenames<-baseline.filenames[grep(".txt",baseline.filenames)]
+
+six.filenames<-list.files(six.cufflinks.dir)
+six.filenames<-six.filenames[grep(".txt",six.filenames)]
+
+# for the baseline visits only
+filenames<-baseline.filenames
+cufflinks.dir<-baseline.cufflinks.dir
+anno.matrix<-character()
+fpkm.matrix<-numeric()
+
+for(i in 1:length(filenames)){
+
+temp<-read.table(file.path(cufflinks.dir,filenames[i]),check.names=F,header=TRUE,stringsAsFactors = FALSE,sep="\t")
+rownames(temp)<-temp[,1]
+
+if(i==1){
+temp.names<-rownames(temp)
+anno.matrix<-as.matrix(temp)[,1:6]
+}else{
+temp<-temp[temp.names,]
+}
+
+fpkm.matrix<-cbind(fpkm.matrix,temp[,ncol(temp)])
+}
+
+sample.names<-unname(sapply(filenames,my.element.remove,splitchar="_",index=-1))
+colnames(fpkm.matrix)<-sample.names
+rownames(fpkm.matrix)<-temp.names
+
+output.filepath<-file.path(output.subdir,"Rawcount_matrix_hg38_noCorrection_baseline.txt")
+cmd.out<-cbind(anno.matrix,fpkm.matrix)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+baseline.count.matrix<-cmd.out
+
+
+# for the 6 month visits only
+filenames<-six.filenames
+cufflinks.dir<-six.cufflinks.dir
+anno.matrix<-character()
+fpkm.matrix<-numeric()
+
+for(i in 1:length(filenames)){
+
+temp<-read.table(file.path(cufflinks.dir,filenames[i]),check.names=F,header=TRUE,stringsAsFactors = FALSE,sep="\t")
+rownames(temp)<-temp[,1]
+
+if(i==1){
+temp.names<-rownames(temp)
+anno.matrix<-as.matrix(temp)[,1:6]
+}else{
+temp<-temp[temp.names,]
+}
+
+fpkm.matrix<-cbind(fpkm.matrix,temp[,ncol(temp)])
+}
+
+sample.names<-unname(sapply(filenames,my.element.remove,splitchar="_",index=-1))
+colnames(fpkm.matrix)<-sample.names
+rownames(fpkm.matrix)<-temp.names
+
+output.filepath<-file.path(output.subdir,"Rawcount_matrix_hg38_noCorrection_6month.txt")
+cmd.out<-cbind(anno.matrix,fpkm.matrix)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+six.count.matrix<-cmd.out
+
+# merge all the baseline and 6 month visits together
+temp1<-rownames(baseline.count.matrix)
+temp2<-rownames(six.count.matrix)
+six.count.matrix<-six.count.matrix[temp1,]
+
+cmd.out<-cbind(baseline.count.matrix[,7:ncol(baseline.count.matrix)],six.count.matrix[,7:ncol(six.count.matrix)])
+cmd.out<-cbind(baseline.count.matrix[,1:6],cmd.out)
+
+output.filepath<-file.path(output.subdir,"Rawcount_matrix_hg38_noCorrection_allSamples.txt")
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+############################################################################
+# do the correction for the 12 mislabelled samples and output the FPKM matrix again
+# get rid of the BAL samples that were included for the ID correction
+cmd.out<-read.table(file.path(output.subdir,"Rawcount_matrix_hg38_noCorrection_allSamples.txt"),sep="\t",header=T,check.names=F,stringsAsFactors = F)
+
+idcorrection.matrix<-matrix(c(
+"06S7133_005","02S7045_011",
+"03S7224_006","05S7101_012",
+"03B9320_007","06B9128_013",
+"03B9219_008","01B9033_014",
+"06B9221_009","04B9250_015",
+"03S7071_010","03B9078_016"),ncol=2,byrow=T)
+
+data.matrix<-cmd.out
+data.matrix<-data.matrix[,7:ncol(data.matrix)]
+
+# switch the IDs
+for(i in 1:nrow(idcorrection.matrix)){
+temp.matrix<-data.matrix[,idcorrection.matrix[i,]]
+temp.matrix<-temp.matrix[,c(2,1)]
+data.matrix[,idcorrection.matrix[i,]]<-temp.matrix
+}
+
+# get rid of the BAL samples
+temp.tissue<-substr(colnames(data.matrix),3,3)
+data.matrix<-data.matrix[,temp.tissue=="S"]
+
+# output the corrected all samples
+output.filepath<-file.path(output.subdir,"Rawcount_matrix_hg38_Corrected_allSamples.txt")
+temp.cmd.out<-cbind(cmd.out[,1:6],data.matrix)
+write.table(data.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+# output the baseline visits
+output.filepath<-file.path(output.subdir,"Rawcount_matrix_hg38_Corrected_baseline.txt")
+temp.names<-colnames(baseline.count.matrix)[7:ncol(baseline.count.matrix)]
+temp.names<-temp.names[temp.names%in%colnames(data.matrix)]
+temp.matrix<-data.matrix[,temp.names]
+temp.cmd.out<-cbind(cmd.out[,1:6],temp.matrix)
+write.table(temp.cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+n1<-ncol(temp.matrix)
+subject.n1<-length(unique(unname(sapply(colnames(temp.matrix),my.element.extract,splitchar="_",index=1))))
+
+# output the 6 month visits
+output.filepath<-file.path(output.subdir,"Rawcount_matrix_hg38_Corrected_6month.txt")
+temp.names<-colnames(six.count.matrix)[7:ncol(six.count.matrix)]
+temp.names<-temp.names[temp.names%in%colnames(data.matrix)]
+temp.matrix<-data.matrix[,temp.names]
+temp.cmd.out<-cbind(cmd.out[,1:6],temp.matrix)
+write.table(temp.cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+n2<-ncol(temp.matrix)
+subject.n2<-length(unique(unname(sapply(colnames(temp.matrix),my.element.extract,splitchar="_",index=1))))
+
+cat("There are in total ",n1," baseline visits and ",n2," 6-month visits.\n",
+    "The baseline vists belong to ",subject.n1," subjects and the 6-month visits belong to ",subject.n2," subjects.\n",sep="")
+
+```
+
+## 5. Extracting the clinical features
+The database that we received from GRADS study is the mysql dump files under `` `r file.path(home.dir,"/scratch/GRADS/SARC_results/Data/SARC_GRADS_data_20170712")` ``. 
+
+To generate a table that has patients as rows and columns as clinical features, we extracted the data using `` `r file.path(home.dir,"/Rprogram/GRADS_PBMC/DataPreprocessing/0_ClinicalDataConversion_PBMC.R")` ``.
+
+```{r 0_ClinicalDataConversion_pbmc.R,eval=FALSE,echo=TRUE,results='markup'}
+################################################################################
+# These codes generate the clinical data from the files downloaded from the data portal in the same format as what we received before
+output.subdir<-file.path(output.dir,"data/clinicaldata_extract_20190819_PBMC")
+if(file.exists(output.subdir)==F){
+dir.create(output.subdir)
+}
+
+clinic.filepath.old<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_table_20151201.xlsx")
+dictionary.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_GRADS_data_20170712/clinical/data-dictionaries")
+clinic.filepath.new.patient<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_GRADS_data_20170712/clinical/PatientData.csv")
+clinic.filepath.new.visit<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_GRADS_data_20170712/clinical/VisitData.csv")
+
+# generate the file to contain the warning messages about the data
+warning.filepath<-file.path(output.subdir,"extraction_warnings.txt")
+cat(as.character(Sys.time()),"\n","This file describes the inconsistency between \n",clinic.filepath.old,"\nand\n",clinic.filepath.new.visit,"\n\n",sep="",file=warning.filepath,append=F)
+
+library(gdata)
+options(warn=1)
+# load in the clinical variable names from the old clinical file
+clinic.matrix<-read.xls(clinic.filepath.old,check.names=F)
+clinic.names<-colnames(clinic.matrix)[-1]
+
+
+# load in the new clinical data
+clinic.matrix.patient<-read.csv(clinic.filepath.new.patient,check.names=F,na.strings=c("","N/A","NA"),stringsAsFactors = FALSE)
+clinic.matrix.visit<-read.csv(clinic.filepath.new.visit,check.names=F,na.strings=c("","N/A","NA"),stringsAsFactors = FALSE)
+
+clinic.matrix.visit<-clinic.matrix.visit[,-ncol(clinic.matrix.visit)]
+clinic.matrix.patient<-clinic.matrix.patient[,-ncol(clinic.matrix.patient)]
+
+# correct some of the DOBs that were typos that are different across different visits for the same patient
+clinic.matrix.visit[as.matrix(clinic.matrix.visit)[,1]=="01S028","demog.dob"]<-"1953-02-15 00:00:00.0"
+clinic.matrix.visit[as.matrix(clinic.matrix.visit)[,1]=="02S010","demog.dob"]<-"1962-02-18 00:00:00.0"
+clinic.matrix.visit[as.matrix(clinic.matrix.visit)[,1]=="08S030","demog.dob"]<-"1973-01-28 00:00:00.0"
+clinic.matrix.visit[as.matrix(clinic.matrix.visit)[,1]=="08S049","demog.dob"]<-"1983-04-13 00:00:00.0"
+
+# load in the dictionary of the new clinical files
+filenames<-list.files(dictionary.dir)
+varmapping.matrix<-character()
+
+
+for(i in 1:length(filenames)){
+domain.name<-my.element.extract(filenames[i],splitchar="\\(",index=1)
+temp.matrix<-read.csv(file.path(dictionary.dir,filenames[i]),header=F,check.names=F)
+varmapping.matrix<-rbind(varmapping.matrix,cbind(rep(domain.name,nrow(temp.matrix)),as.matrix(temp.matrix)[,1:2]))
+}
+
+colnames(varmapping.matrix)<-c("domain","varname","explanation")
+
+# generate the clinical matrix in the same format as the old clinical data matrix
+clinic.names.mapping<-list()
+for(i in 1:length(clinic.names)){
+if(sum(toupper(varmapping.matrix[,2])==clinic.names[i])==0){
+temp.matrix<-character()	
+}else{
+temp.matrix<-varmapping.matrix[toupper(varmapping.matrix[,2])==clinic.names[i],]
+}
+clinic.names.mapping[[i]]<-temp.matrix
+}
+
+
+names(clinic.names.mapping)<-clinic.names
+
+# all the clinical variables have unique mapping in the dictionary except for CONSDATE and AGE. 
+# Age can be calculated from demog.dob and smplc.dtblood
+
+# generate the clinical data for the BAL samples
+#temp.clinic.visit<-clinic.matrix.visit[as.matrix(clinic.matrix.visit[,"bal.kit"])!="",]
+temp.clinic.visit<-clinic.matrix.visit[!is.na(clinic.matrix.visit[,"smplc.kit"]),]
+temp.match<-match(as.matrix(temp.clinic.visit)[,1],as.matrix(clinic.matrix.patient)[,1])
+temp.clinic.patient<-clinic.matrix.patient[temp.match,]
+
+domain.visit<-unique(sapply(colnames(temp.clinic.visit),my.element.extract,splitchar="\\.",index=1))
+domain.patient<-unique(sapply(colnames(temp.clinic.patient),my.element.extract,splitchar="\\.",index=1))
+
+# generate the final clinical data matrix for output
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1]
+
+# The first variable is CONSDATE which will be from the old clinical file
+clinic.data.final<-data.frame(GRADSID=as.matrix(temp.clinic.visit)[,1],CONSDATE=as.matrix(clinic.matrix)[as.matrix(temp.clinic.visit)[,1],2])
+
+for(i in 2:length(clinic.names)){
+#cat("i=",i,"\n")
+
+if(length(clinic.names.mapping[[i]])==0){
+# if there's no matching variable. This will be the AGE
+# we calculate the age as bal.baldate-demog.dob
+temp.matrix<-as.matrix(clinic.matrix.visit)[as.matrix(clinic.matrix.visit)[,"visit"]=="Enrollment / Clinic Visit",]
+temp.dob<-as.matrix(clinic.matrix.visit)[as.matrix(clinic.matrix.visit)[,"visit"]=="Enrollment / Clinic Visit","demog.dob"]
+temp.dob<-unname(sapply(temp.dob,my.element.extract,splitchar=" ",index=1))
+names(temp.dob)<-temp.matrix[,1]
+temp.dob<-temp.dob[as.matrix(temp.clinic.visit)[,1]]
+
+# filling the missing dob using the old clinical data
+temp.names<-names(temp.dob)[is.na(temp.dob) & (!is.na(clinic.matrix[as.matrix(temp.clinic.visit)[,1],"DOB"])) & as.matrix(clinic.matrix)[as.matrix(temp.clinic.visit)[,1],"DOB"]!="" ]
+if(length(temp.names)>0){
+temp.dob[temp.names]<-as.matrix(clinic.matrix)[temp.names,"DOB"]
+}
+
+temp.date<-as.matrix(temp.clinic.visit)[,"smplc.dtblood"]
+#temp.date<-as.matrix(temp.clinic.visit)[,"bal.baldate"]
+#temp.date<-as.matrix(temp.clinic.visit)[,"demog.formdate"]
+temp.date<-unname(sapply(temp.date,my.element.extract,splitchar=" ",index=1))
+
+temp.age<-as.Date(temp.date,format="%Y-%m-%d")-as.Date(temp.dob,format="%Y-%m-%d")
+names(temp.age)<-names(temp.dob)
+temp.age<-temp.age/365
+
+#cbind(clinic.matrix[names(temp.age),"AGE"],temp.age,as.matrix(temp.clinic.visit)[names(temp.age),"visit"])
+clinic.data.final<-cbind(clinic.data.final,temp.age)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]==temp.age,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum(is.na(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]) & !is.na(temp.age)),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((!is.na(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]])) & is.na(temp.age)),"/",nrow(temp.clinic.visit)," has NA in new data but not in old data\n\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(length(clinic.names.mapping[[i]])>3){
+# this is KIT, we put the blood KIT ID
+clinic.data.final<-cbind(clinic.data.final,as.matrix(temp.clinic.visit)[,"smplc.kit"])
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]==as.matrix(temp.clinic.visit)[,"smplc.kit"],na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum(is.na(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]) & !is.na(as.matrix(temp.clinic.visit)[,"smplc.kit"])),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((!is.na(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]])) & is.na(as.matrix(temp.clinic.visit)[,"smplc.kit"])),"/",nrow(temp.clinic.visit)," has NA in new data\n\n",sep="",file=warning.filepath,append=T)
+cat("NOTE: The KIT IDs in the old clinical data was for BAL samples and here we are extracting the PBMC samples.\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(clinic.names.mapping[[i]][1]=="demog"){
+
+# get the phenotype from all visits together for all patients
+temp.list<-split(as.matrix(clinic.matrix.visit)[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")],as.matrix(clinic.matrix.visit)[,1])	
+temp.list<-lapply(temp.list,unique)
+for(j in 1:length(temp.list)){
+#temp.list[[j]]<-temp.list[[j]][temp.list[[j]]!=""]
+temp.list[[j]]<-temp.list[[j]][!is.na(temp.list[[j]])]	
+if(length(temp.list[[j]])==0){
+temp.list[[j]]<-NA
+}
+}
+
+# check whether some patients have inconsistent answers for the same variable across different visits
+if(sum(unlist(lapply(temp.list,length))>1)>0){
+cat("\ndemographic variable (",clinic.names[i],") has multiple values for ",paste(names(temp.list)[unlist(lapply(temp.list,length))>1],collapse=";"),"\n",sep="",file=warning.filepath,append=T)
+temp.list[unlist(lapply(temp.list,length))>1]<-NA
+}
+temp.list<-temp.list[as.matrix(clinic.matrix)[,1]]
+
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character") && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+#fixed
+# get the matching between numerical coding and character coding
+temp.table<-table(unlist(temp.list),as.matrix(clinic.matrix)[,clinic.names[i]])
+temp.mapping<-character()
+for(j in 1:nrow(temp.table)){
+
+if(sum(temp.table[j,]==max(temp.table[j,]))>1){
+cat("WARNING:clinic.names[",i,"]=",clinic.names[i],": j=",j," has multiple matches to old values!\n",file=warning.filepath,append=T)
+temp.num<-as.numeric(colnames(temp.table)[temp.table[j,]==max(temp.table[j,])])
+temp.mapping<-rbind(temp.mapping,c(rownames(temp.table)[j],as.character(temp.num[temp.num>=0])))
+}else{
+temp.mapping<-rbind(temp.mapping,c(rownames(temp.table)[j],colnames(temp.table)[temp.table[j,]==max(temp.table[j,])]))	
+}	
+
+}
+rownames(temp.mapping)<-as.character(as.numeric(temp.mapping[,2]))
+
+# output the temp.mapping
+cat("clinic.names[",i,"]=",clinic.names[i],":\n",sep="",file=warning.filepath,append=T)
+write.table(temp.mapping,file=warning.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+cat("\n",file=warning.filepath,append=T)
+
+# filling the missing values in the new data using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-unlist(temp.list)
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+
+# convert the new data values into numerical coding, all unknown or NA are NA
+rownames(temp.mapping)<-temp.mapping[,1]
+temp.result<-rep(NA,length(temp.vect))
+temp.result[!is.na(temp.vect)]<-as.numeric(temp.mapping[temp.vect[!is.na(temp.vect)],2])
+temp.result[!is.na(temp.result) & temp.result<0]<-NA
+names(temp.result)<-names(temp.vect)
+
+# filling the missing values using old clinical data
+temp.names<-names(temp.vect)[is.na(temp.result)]
+temp.names<-temp.names[(!is.na(clinic.matrix[temp.names,clinic.names[i]])) & clinic.matrix[temp.names,clinic.names[i]]>=0]
+
+if(length(temp.names)>0){
+temp.result[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.result)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.result,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old<0) & (!is.na(temp.result))),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old<0) & is.na(temp.result)),"/",nrow(temp.clinic.visit)," has NA in both data\n\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data filled\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character") && class(clinic.matrix[,clinic.names[i]])%in%c("factor","character")){
+#fixed
+# if the clinic.matrix.visit are coded by character and clinic.matrix are coded by numeric
+
+if(clinic.names[i]=="DOB"){
+for(j in 1:length(temp.list)){
+if(!is.na(temp.list[[j]])){
+temp.list[[j]]<-my.element.extract(temp.list[[j]],splitchar=" ",index=1)
+}
+}
+}
+
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-unlist(temp.list)
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]]) & clinic.matrix[temp.names,clinic.names[i]]!=""]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-as.matrix(clinic.matrix)[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-as.matrix(clinic.matrix)[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]) | temp.old=="") & (!is.na(temp.vect))),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old=="") & is.na(temp.result)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data but not in old data\n\n",sep="",file=warning.filepath,append=T)
+
+next
+
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("numeric","integer") && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+#fixed
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-as.numeric(unlist(temp.list))
+names(temp.vect)<-names(temp.list)
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]])]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum(is.na(temp.old) & (!is.na(temp.vect))),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old)) & is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data but not in old data\n\n",sep="",file=warning.filepath,append=T)
+
+next
+
+}
+
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("numeric","integer") && class(clinic.matrix[,clinic.names[i]])%in%c("factor","character")){
+cat("\ni=",i,",",clinic.names[i]," was factor in old data but numeric in new data\n\n\n",sep="")
+next
+}
+
+}
+
+# for domains from the visit data
+
+if(clinic.names.mapping[[i]][1]%in%domain.visit){
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character")){
+temp.matrix<-as.matrix(temp.clinic.visit)[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")]
+}else{
+temp.matrix<-temp.clinic.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")]
+}
+
+if(length(grep("DATE",clinic.names.mapping[[i]][3]))>0){
+temp.matrix<-as.character(temp.matrix)
+temp.matrix[!is.na(temp.matrix)]<-sapply(temp.matrix[!is.na(temp.matrix)],my.element.extract,splitchar=" ",index=1)	
+}
+names(temp.matrix)<-as.matrix(temp.clinic.visit)[,1]
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character") && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+#fixed i=20
+#cat("\ni=",i,",",clinic.names[i]," has factor in old data but nuermic in new data\n\n\n",sep="")
+# get the matching between numerical coding and character coding
+temp.table<-table(temp.matrix,as.matrix(clinic.matrix)[as.matrix(temp.clinic.visit)[,1],clinic.names[i]])
+temp.mapping<-character()
+for(j in 1:nrow(temp.table)){
+temp.mapping<-rbind(temp.mapping,c(rownames(temp.table)[j],colnames(temp.table)[temp.table[j,]==max(temp.table[j,])]))
+}
+rownames(temp.mapping)<-as.character(as.numeric(temp.mapping[,2]))
+
+# output the temp.mapping
+cat("clinic.names[",i,"]=",clinic.names[i],":\n",sep="",file=warning.filepath,append=T)
+write.table(temp.mapping,file=warning.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+cat("\n",file=warning.filepath,append=T)
+
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-temp.matrix
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+
+# convert the filled values into numerical coding
+rownames(temp.mapping)<-temp.mapping[,1]
+temp.result<-rep(NA,length(temp.vect))
+temp.result[!is.na(temp.vect)]<-as.numeric(temp.mapping[temp.vect[!is.na(temp.vect)],2])
+
+# filling the missing values using old data
+temp.names<-names(temp.result)[is.na(temp.result)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]]) & clinic.matrix[temp.names,clinic.names[i]]>=0]
+temp.result[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+
+clinic.data.final<-cbind(clinic.data.final,temp.result)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.result,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old<0) & (!is.na(temp.result))),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old<0) & is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character") && class(clinic.matrix[,clinic.names[i]])%in%c("factor","character")){
+# fixed i=18
+# if the clinic.matrix.visit are coded by character and clinic.matrix are also coded by character
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-temp.matrix
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]]) & clinic.matrix[temp.names,clinic.names[i]]!=""]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-as.matrix(clinic.matrix)[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-as.matrix(clinic.matrix)[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old=="") & (!is.na(temp.result))),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old=="") & is.na(temp.result)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data\n\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("numeric","integer") && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+# fixed i=159
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+
+if(clinic.names.mapping[[i]][1]=="pft"){
+enrollment.visit<-clinic.matrix.visit[as.matrix(clinic.matrix.visit)[,2]=="Enrollment / Clinic Visit",]
+rownames(enrollment.visit)<-as.matrix(enrollment.visit)[,1]	
+temp.vect.2<-enrollment.visit[names(temp.matrix),paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")]
+temp.vect.2[temp.vect.2<0]<-NA
+names(temp.vect.2)<-names(temp.matrix)
+temp.vect<-temp.vect.2
+}else{
+temp.vect<-temp.matrix
+}
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]])]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum(is.na(temp.old) & !is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old)) & is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data\n\n",sep="",file=warning.filepath,append=T)
+next
+
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])=="logical" && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+# fixed i=25 bal.cigtype
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-temp.matrix
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]])]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum(is.na(temp.old) & !is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old)) & is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data\n\n",sep="",file=warning.filepath,append=T)
+next
+}
+
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("numeric","integer") && class(clinic.matrix[,clinic.names[i]])%in%c("factor","character")){
+cat("\ni=",i,",",clinic.names[i]," has factor in old data but numeric in new data\n\n\n",sep="")
+next
+}
+
+}else{
+#cat("\ni=",i,",",clinic.names[i]," is from patient data\n\n\n",sep="")
+# only 178 (scadding) and 179 (phengrp) are from patient data
+
+# if the domain is for patient data
+if(class(clinic.matrix.patient[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character")){
+temp.matrix<-as.matrix(temp.clinic.patient)[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")]
+}else{
+temp.matrix<-temp.clinic.patient[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")]
+}
+
+if(length(grep("SCADDING",clinic.names.mapping[[i]][3]))>0){
+temp.matrix<-as.character(temp.matrix)
+temp.matrix[temp.matrix=="I"]="1"
+temp.matrix[temp.matrix=="II"]="2"
+temp.matrix[temp.matrix=="III"]="3"
+temp.matrix[temp.matrix=="IV"]="4"
+}
+
+names(temp.matrix)<-as.matrix(temp.clinic.patient)[,1]
+
+if(class(clinic.matrix.patient[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character") && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+#fixed i=178
+# get the matching between numerical coding and character coding
+temp.table<-table(temp.matrix,as.matrix(clinic.matrix)[as.matrix(temp.clinic.patient)[,1],clinic.names[i]])
+temp.mapping<-character()
+for(j in 1:nrow(temp.table)){
+temp.mapping<-rbind(temp.mapping,c(rownames(temp.table)[j],colnames(temp.table)[temp.table[j,]==max(temp.table[j,])]))
+}
+rownames(temp.mapping)<-as.character(as.numeric(temp.mapping[,2]))
+
+# output the temp.mapping
+cat("clinic.names[",i,"]=",clinic.names[i],":\n",sep="",file=warning.filepath,append=T)
+write.table(temp.mapping,file=warning.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+cat("\n",file=warning.filepath,append=T)
+
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-temp.matrix
+temp.vect<-temp.vect[as.matrix(temp.clinic.patient)[,1]]
+
+# convert the filled values into numerical coding
+rownames(temp.mapping)<-temp.mapping[,1]
+temp.result<-rep(NA,length(temp.vect))
+temp.result[!is.na(temp.vect)]<-as.numeric(temp.mapping[temp.vect[!is.na(temp.vect)],2])
+
+# filling the missing values using old data
+temp.names<-names(temp.result)[is.na(temp.result)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]]) & clinic.matrix[temp.names,clinic.names[i]]>=0]
+temp.result[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+
+clinic.data.final<-cbind(clinic.data.final,temp.result)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.patient)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.patient)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.result,na.rm=T),"/",nrow(temp.clinic.patient)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old<0) & (!is.na(temp.result))),"/",nrow(temp.clinic.patient)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old<0) & is.na(temp.vect)),"/",nrow(temp.clinic.patient)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.patient)," has NA in new data\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("factor","character") && class(clinic.matrix[,clinic.names[i]])%in%c("factor","character")){
+
+# if the clinic.matrix.patient are coded by character and clinic.matrix are also coded by character
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-temp.matrix
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]]) & clinic.matrix[temp.names,clinic.names[i]]!=""]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-as.matrix(clinic.matrix)[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-as.matrix(clinic.matrix)[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old=="") & (!is.na(temp.result))),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old) | temp.old=="") & is.na(temp.result)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data\n\n",sep="",file=warning.filepath,append=T)
+
+next
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("numeric","integer") && class(clinic.matrix[,clinic.names[i]])%in%c("numeric","integer")){
+# fixed i=159
+# filling the missing values using the old clinical data (mostly because of the inconsistent answers)
+temp.vect<-temp.matrix
+temp.vect<-temp.vect[as.matrix(temp.clinic.visit)[,1]]
+temp.names<-names(temp.vect)[is.na(temp.vect)]
+temp.names<-temp.names[!is.na(clinic.matrix[temp.names,clinic.names[i]])]
+
+if(length(temp.names)>0){
+temp.vect[temp.names]<-clinic.matrix[temp.names,clinic.names[i]]
+}
+
+clinic.data.final<-cbind(clinic.data.final,temp.vect)
+colnames(clinic.data.final)[ncol(clinic.data.final)]<-clinic.names[i]
+temp.old<-clinic.matrix[as.matrix(temp.clinic.visit)[,1],clinic.names[i]]
+names(temp.old)<-as.matrix(temp.clinic.visit)[,1]
+
+cat("\nclinic.names[",i,"]=",clinic.names[i],": ",sum(temp.old==temp.vect,na.rm=T),"/",nrow(temp.clinic.visit)," has the same values!\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum(is.na(temp.old) & !is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in old data updated\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",sum((is.na(temp.old)) & is.na(temp.vect)),"/",nrow(temp.clinic.visit)," has NA in both data\n",sep="",file=warning.filepath,append=T)
+cat("clinic.names[",i,"]=",clinic.names[i],": ",length(temp.names),"/",nrow(temp.clinic.visit)," has NA in new data\n\n",sep="",file=warning.filepath,append=T)
+next
+
+}
+
+if(class(clinic.matrix.visit[,paste(clinic.names.mapping[[i]][1],".",clinic.names.mapping[[i]][2],sep="")])%in%c("numeric","integer") && class(clinic.matrix[,clinic.names[i]])%in%c("factor","character")){
+cat("\ni=",i,",",clinic.names[i]," has factor in old data but numeric in new data\n\n\n",sep="")
+next
+}
+
+}
+
+}
+colnames(clinic.data.final)<-c("GRADSID",clinic.names)
+
+# output the results
+output.filepath<-file.path(output.subdir,"clinicaldata_20190819.txt")
+write.table(clinic.data.final,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+```
+
+The extracted clincal feature matrix was saved as `` `r file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clinicaldata_extract_20190819_PBMC/clinicaldata_20190819.txt")` ``
+
+The CT scan features are in `` `r file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")` ``. We merge the clinical feature data with the CT scan features. Cell differentials are already in the clinical feature data but only for the BAL samples. There's no cell differential data for the PBMC samples.
+
+```{r baseline_clinical_merge}
+###############################################################
+# Here we generate the clnical feature matrix for the visits in the given gene expression data based on their KIT IDs
+# we load in the file for BAL data to keep the same format (same group of variables to extract)
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/FPKM_matrix_hg38_Corrected_baseline.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clinicaldata_extract_20190819_PBMC/clinicaldata_20190819.txt")
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+format.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_combine_clinical_data20170814.txt")
+masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+output.subdir<-file.path(output.dir,"data")
+
+# load in the gene expression data, clinical features and CT features separately
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+sample.names<-colnames(fpkm.matrix)[10:ncol(fpkm.matrix)]
+
+clinic.matrix<-read.table(clinic.filepath,sep="\t",check.names=F,header=T,stringsAsFactors = FALSE,quote="")
+clinic.matrix<-clinic.matrix[clinic.matrix[,"KIT"]%in%unname(sapply(sample.names,my.element.extract,splitchar="_",index=1)),]
+rownames(clinic.matrix)<-clinic.matrix[,1]
+ct.matrix<-read.xls(ct.filepath,check.names=F)
+rownames(ct.matrix)<-as.matrix(ct.matrix)[,1]
+
+format.matrix<-read.table(format.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+master.matrix<-read.xls(masterkey.filepath,check.names=F,header=T,sheet=3,skip=2,stringsAsFactors=FALSE)
+
+# get the column names for clinic.matrix and ct.matrix
+temp.names.1<-colnames(format.matrix)[colnames(format.matrix)%in%colnames(clinic.matrix)]
+temp.names.2<-setdiff(colnames(format.matrix),temp.names.1)
+temp.names.2<-temp.names.2[temp.names.2%in%colnames(ct.matrix)]
+
+if((length(temp.names.1)+length(temp.names.2))!=ncol(format.matrix)){
+  cat("WARNING: ",paste(setdiff(colnames(),c(temp.names.1,temp.names.2)),collapse=" ")," cannot be found in the clinic file or the CT feature file.\n",sep="")
+}
+
+# get the GRADS IDs
+my.kitid<-unname(sapply(sample.names,my.element.extract,splitchar="_",index=1))
+my.master.matrix<-master.matrix[master.matrix[,2]!="",]
+my.master.matrix<-my.master.matrix[my.master.matrix[,2]%in%my.kitid,]
+rownames(my.master.matrix)<-my.master.matrix[,2]
+my.gradsid<-my.master.matrix[my.kitid,1]
+my.gradsid<-my.gradsid[my.gradsid%in%rownames(clinic.matrix) | my.gradsid%in%rownames(ct.matrix)]
+
+my.matrix<-cbind(clinic.matrix[my.gradsid,temp.names.1],ct.matrix[my.gradsid,temp.names.2])
+my.matrix[,1]<-my.gradsid
+
+# output the data into a file
+output.filepath<-file.path(output.subdir,"SARC_combine_clinical_data20190819_PBMC_baseline.txt")
+write.table(my.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+cat("The combined clinical data and CT scan data for the baseline visits is saved as ",output.filepath,"\n",sep="")
+```
+
+
+```{r 6month_clinical_merge}
+###############################################################
+# Here we generate the clnical feature matrix for the visits in the given gene expression data based on their KIT IDs
+# we load in the file for BAL data to keep the same format (same group of variables to extract)
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/FPKM_matrix_hg38_Corrected_6month.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clinicaldata_extract_20190819_PBMC/clinicaldata_20190819.txt")
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+format.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_combine_clinical_data20170814.txt")
+masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+output.subdir<-file.path(output.dir,"data")
+
+# load in the gene expression data, clinical features and CT features separately
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+sample.names<-colnames(fpkm.matrix)[10:ncol(fpkm.matrix)]
+
+clinic.matrix<-read.table(clinic.filepath,sep="\t",check.names=F,header=T,stringsAsFactors = FALSE,quote="")
+clinic.matrix<-clinic.matrix[clinic.matrix[,"KIT"]%in%unname(sapply(sample.names,my.element.extract,splitchar="_",index=1)),]
+rownames(clinic.matrix)<-clinic.matrix[,1]
+ct.matrix<-read.xls(ct.filepath,check.names=F)
+rownames(ct.matrix)<-as.matrix(ct.matrix)[,1]
+
+format.matrix<-read.table(format.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+master.matrix<-read.xls(masterkey.filepath,check.names=F,header=T,sheet=3,skip=2,stringsAsFactors=FALSE)
+
+# get the column names for clinic.matrix and ct.matrix
+temp.names.1<-colnames(format.matrix)[colnames(format.matrix)%in%colnames(clinic.matrix)]
+temp.names.2<-setdiff(colnames(format.matrix),temp.names.1)
+temp.names.2<-temp.names.2[temp.names.2%in%colnames(ct.matrix)]
+
+if((length(temp.names.1)+length(temp.names.2))!=ncol(format.matrix)){
+  cat("WARNING: ",paste(setdiff(colnames(),c(temp.names.1,temp.names.2)),collapse=" ")," cannot be found in the clinic file or the CT feature file.\n",sep="")
+}
+
+# get the GRADS IDs
+my.kitid<-unname(sapply(sample.names,my.element.extract,splitchar="_",index=1))
+my.master.matrix<-master.matrix[master.matrix[,3]!="",]
+my.master.matrix<-my.master.matrix[my.master.matrix[,3]%in%my.kitid,]
+rownames(my.master.matrix)<-my.master.matrix[,3]
+my.gradsid<-my.master.matrix[my.kitid,1]
+my.gradsid<-my.gradsid[my.gradsid%in%rownames(clinic.matrix) | my.gradsid%in%rownames(ct.matrix)]
+
+my.matrix<-cbind(clinic.matrix[my.gradsid,temp.names.1],ct.matrix[my.gradsid,temp.names.2])
+my.matrix[,1]<-my.gradsid
+
+# output the data into a file
+output.filepath<-file.path(output.subdir,"SARC_combine_clinical_data20190819_PBMC_6month.txt")
+write.table(my.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+cat("The combined clinical data and CT scan data for all the 6month follow-up visits is saved as ",output.filepath,"\n",sep="")
+```
+
+$\color{red}{\text{NOTE:}}$ The FPKM and raw counts matrices generated here include both outliers and repeated reactions for the same sample. Their corresponding merged clinical data would have repeated subjects because of this. 

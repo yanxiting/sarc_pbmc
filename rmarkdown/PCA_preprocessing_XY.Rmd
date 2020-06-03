@@ -1,0 +1,528 @@
+---
+title: "PCA of the GRADS PBMC baseline expression data"
+author: "Shiyu Wang"
+date: "1/2/2019"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '6'
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: yes
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+header-includes: \usepackage[dvips]{graphicx}
+---
+```{r setup, include=FALSE}
+library(knitr)
+library(gplots)
+library(rgl)
+library(fields)
+library(rmarkdown)
+library(installr)
+
+
+knitr::opts_chunk$set(echo = FALSE,eval=TRUE,cache=TRUE,warning=FALSE,message=FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+
+
+knit_hooks$set(webgl = hook_webgl)
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+home.dir<-"/gpfs/scratch/fas/kaminski/public/sw894/proj1"
+source("C:/Yalecourses/lab/Project4/proj2/my_functions.R")
+#source("C:/Yalecourses/lab/Project4/proj2/my_functions.R")
+```
+
+# First round PCA
+The first round PCA is to exclude mislabeled reactions. Then we compare each two groups.
+
+
+```{r}
+
+# load in the BAL gene expression data
+fpkm.matrix<-read.table(file.path("FPKM_matrix_hg38_Corrected_allGenes_allBAL_withAnnot.txt"),check.names=FALSE,header=T,stringsAsFactors = F)
+rownames(fpkm.matrix)<-paste(fpkm.matrix[,"gene_id"],fpkm.matrix[,"tss_id"],sep="_")
+fpkm.matrix<-fpkm.matrix[,10:ncol(fpkm.matrix)]
+
+# load in the PBMC baseline gene expression data
+fpkm.matrix.pbmc<-read.table(file.path("FPKM_matrix_hg38_Corrected_allGenes_allPBMCB_withAnnot.txt"),check.names=FALSE,header=T,stringsAsFactors = F)
+rownames(fpkm.matrix.pbmc)<-paste(fpkm.matrix.pbmc[,"gene_id"],fpkm.matrix.pbmc[,"tss_id"],sep="_")
+fpkm.matrix.pbmc<-fpkm.matrix.pbmc[,10:ncol(fpkm.matrix.pbmc)]
+
+data.matrix<-cbind(fpkm.matrix,fpkm.matrix.pbmc[rownames(fpkm.matrix),])
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #22624    52
+
+
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+
+my.color.gen<-function(date){
+# this function generates the color names for every element in date
+temp<-sort(unique(date),decreasing=T)
+color.int<-rep(0,length(date))
+color.num<-rep("",length(date))
+for(i in 1:length(temp)){
+color.num[date==temp[i]]<-colorpanel(length(temp),low="red",mid="grey",high="blue")[i]
+color.int[date==temp[i]]<-i
+}
+color.names<-temp
+result<-list(color.num=color.num,color.int=color.int,color.names=color.names)
+return(result)
+}
+
+temp<-my.color.gen(c(rep("BAL",ncol(fpkm.matrix)),rep("PBMC",ncol(fpkm.matrix.pbmc))))
+my.color.num<-temp$color.num
+my.colors<-my.color.num
+
+my.colors<-c(rep("blue",ncol(fpkm.matrix)),rep("red",ncol(fpkm.matrix.pbmc)))
+```
+
+1. PBMC baseline vs BAL
+In total, there are `r ncol(fpkm.matrix)` samples in the BAL expression data and `r ncol(fpkm.matrix.pbmc)` samples in the PBMC baseline data. There are in total `r nrow(fpkm.matrix)` genes in both matrices.
+
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_1",caption="PCA plot for PBMC baseline and the BAL samples together."),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_1",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+legend3d("topright", legend = c("BAL","PBMC baseline"), pch = 16, col = c(my.colors[1],my.colors[length(my.colors)]),cex=1.5, inset=c(0.02,0.02))
+```
+
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_2",caption="PCA plot for PBMC baseline only using the PCA loading from both PBMC baseline samples."),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_2",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+open3d() 
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[colnames(fpkm.matrix.pbmc),1],my.projected[colnames(fpkm.matrix.pbmc),2],my.projected[colnames(fpkm.matrix.pbmc),3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors[colnames(data.matrix)%in%colnames(fpkm.matrix.pbmc)],type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[colnames(fpkm.matrix.pbmc),1],my.projected[colnames(fpkm.matrix.pbmc),2],my.projected[colnames(fpkm.matrix.pbmc),3],labels=colnames(data.matrix)[colnames(data.matrix)%in%colnames(fpkm.matrix.pbmc)],n=ncol(fpkm.matrix.pbmc),plot=TRUE)
+legend3d("topright", legend = c("BAL","PBMC baseline"), pch = 16, col = c(my.colors[1],my.colors[length(my.colors)]),cex=1.5, inset=c(0.02,0.02))
+```
+
+Based on the results, there are 1 mislabelled sample and 4 outliers:
+
+```{r}
+mislab.samples<-c("03S7222_003")
+outliers.r1<-c("04S7095_006","03S7231_009","03S7077_001","08S7633_012")
+cat("mislabelled:",mislab.samples,sep="\n")
+cat("\noutliers:",outliers.r1,sep="\n")
+```
+
+2. PBMC baseline alone
+
+For PBMC baseline group, remove mislabeled reactions and redo the PCA:
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_3",caption="PCA plot for PBMC baseline only using the PCA loading from both PBMC baseline samples."),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_3",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# load in the PBMC baseline gene expression data
+fpkm.matrix.o<-fpkm.matrix.pbmc[,!colnames(fpkm.matrix.pbmc) %in% c(mislab.samples)]
+
+data.matrix<-fpkm.matrix.o
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #22624    52
+
+
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+
+my.colors<-c(rep("red",ncol(fpkm.matrix.o)))
+
+
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+legend3d("topright", legend = c("PBMC baseline"), pch = 16, col = c(my.colors[length(my.colors)]),cex=1.5, inset=c(0.02,0.02))
+```
+
+For PBMC baseline group, remove mislabeled reactions and outliers and redo the PCA:
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_4",caption="PCA plot for PBMC baseline only using the PCA loading from PBMC baseline samples."),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_4",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# load in the PBMC baseline gene expression data
+fpkm.matrix.o<-fpkm.matrix.pbmc[,!colnames(fpkm.matrix.pbmc) %in% c(mislab.samples,outliers.r1)]
+
+data.matrix<-fpkm.matrix.o
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #22624    52
+
+
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+
+my.colors<-c(rep("red",ncol(fpkm.matrix.o)))
+
+
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+legend3d("topright", legend = c("PBMC baseline"), pch = 16, col = c(my.colors[length(my.colors)]),cex=1.5, inset=c(0.02,0.02))
+```
+# Second round PCA
+The second-round PCA will detect outliers based on the preprocessing quality.
+
+<1> labelled using total # of reads (raw)
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_5",caption="PCA plot labelled using total # of reads (raw)"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_5",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# load in the mapping summary of all the samples
+mapsum.matrix<-read.table("mapping_summary_STAR.txt",header=T,row.names=1,check.names=F,stringsAsFactors = FALSE)
+
+# load in the PBMC baseline gene expression data
+fpkm.matrix.o<-fpkm.matrix.pbmc[,!colnames(fpkm.matrix.pbmc) %in% c(mislab.samples,outliers.r1)]
+
+data.matrix<-fpkm.matrix.o
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #22624    52
+
+
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+
+# total # of reads raw
+my.colors<-my.color.gen.con(mapsum.matrix[rownames(my.projected),"orig_read"])$color.num
+
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+
+
+<2> labelled using total # of reads (quantile)
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_6",caption="PCA plot labelled using total # of reads (quantile)"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_6",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# total # of reads quantile
+my.colors<-my.color.gen.con(mapsum.matrix[rownames(my.projected),"orig_read"],method="quantile")$color.num
+
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+
+```
+
+
+<3> labelled using total # of final mapped reads (raw)
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_7",caption="PCA plot labelled using total # of final mapped reads (raw)"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_7",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# total # of final mapped reads raw
+my.colors<-my.color.gen.con(mapsum.matrix[rownames(my.projected),"final_mapped_reads"],method="absolute")$color.num
+
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+
+
+<4> labelled using total # of final mapped reads (quantile)
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_8",caption="PCA plot labelled using total # of final mapped reads (quantile)"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_8",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# total # of final mapped reads quantile
+my.colors<-my.color.gen.con(mapsum.matrix[rownames(my.projected),"final_mapped_reads"],method="quantile")$color.num
+
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+
+
+<5> labelled using final mapping rate
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_9",caption="PCA plot labelled using final mapping rate"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_9",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# Final mapping rate
+my.colors<-my.color.gen.con(mapsum.matrix[rownames(my.projected),"final_maprate_reads"],method="absolute")$color.num
+
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+
+
+<6> labelled using total # of expressed genes (raw)
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_10",caption="PCA plot labelled using total # of expressed genes (raw)"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_10",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# # of expressed genes
+expgene.num<-apply(data.matrix>0,2,sum)
+my.colors<-my.color.gen.con(expgene.num,method="absolute")$color.num
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+
+
+<7> labelled using total # of expressed genes (quantile)
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_11",caption="PCA plot labelled using total # of expressed genes (quantile)"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_11",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# # of expressed genes
+expgene.num<-apply(data.matrix>0,2,sum)
+my.colors<-my.color.gen.con(expgene.num,method="quantile")$color.num
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+
+
+Based on the second-round PCA, we find 9 outliers for PBMC baseline reactions:
+```{r}
+outliers.r2<-c("01S7300_009", "06S7207_013")
+cat("outliers:",outliers.r2,sep="\n")
+```
+
+Plot a PBMC baseline PCA without these reactions
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_12",caption="PCA plot without mislabeled reactions and outliers"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_12",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+# load in the PBMC baseline gene expression data
+fpkm.matrix.o<-fpkm.matrix.pbmc[,!colnames(fpkm.matrix.pbmc) %in% c(mislab.samples,outliers.r1,outliers.r2)]
+
+data.matrix<-fpkm.matrix.o
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #22624    52
+
+
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+
+my.colors<-rep("red",ncol(data.matrix))
+
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+```
+# Third round PCA
+The third round PCA is to exclude extra replicates
+
+Find all repeated reactions
+
+```{r}
+# load in the PBMC baseline gene expression data
+fpkm.matrix.o<-fpkm.matrix.pbmc[,!colnames(fpkm.matrix.pbmc) %in% c(mislab.samples,outliers.r1,outliers.r2)]
+
+data.matrix<-fpkm.matrix.o
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #22624    52
+
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+
+# identify patients that have repeated samples in the data
+kit.ids<-unname(sapply(colnames(data.matrix),my.element.extract,splitchar="_",index=1))
+rep.kitids<-names(table(kit.ids))[table(kit.ids)>1]
+rep.names<-colnames(data.matrix)[kit.ids%in%rep.kitids]
+```
+<1> "01S7020_008" "01S7020_008RUN251" ---exclude "01S7020_008"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_13",caption="PCA plot for evaluating 01S7020_008 and 01S7020_008RUN251"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_13",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[1]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("01S7020_008", "01S7020_008RUN251"),]
+```
+<2> "01S7312_004" "01S7312_006" ---exclude "01S7312_004"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_14",caption="PCA plot for evaluating 01S7312_004 and 01S7312_006"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_14",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+  my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[2]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("01S7312_004", "01S7312_006"),]
+```
+<3>  "03S7078_003" "03S7078_003RUN348" ---exclude "03S7078_003"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_15",caption="PCA plot for evaluating 03S7078_003 and 03S7078_003RUN348"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_15",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[3]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("03S7078_003", "03S7078_003RUN348"),]
+```
+<4> "03S7227_011" "03S7227_011RUN287" "03S7227_011RUN302" ---exclude "03S7227_011RUN287", "03S7227_011"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_16",caption="PCA plot for evaluating 03S7227_011, 03S7227_011RUN287 and 03S7227_011RUN302"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_16",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[4]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("03S7227_011RUN287", "03S7227_011RUN302","03S7227_011"),]
+```
+<5> "04S7088_003" "04S7088_014" ---exclude "04S7088_003" 
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_17",caption="PCA plot for evaluating 04S7088_003 and 04S7088_014"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_17",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[5]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("04S7088_003", "04S7088_014"),]
+```
+<6> "04S7472_011" "04S7472_011RUN248" ---exclude "04S7472_011"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_18",caption="PCA plot for evaluating 04S7472_011 and 04S7472_011RUN248"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_18",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[6]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("04S7472_011", "04S7472_011RUN248"),]
+```
+<7> "04S7473_012" "04S7473_012RUN248" ---exclude "04S7473_012"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_19",caption="PCA plot for evaluating 04S7473_012 and 04S7473_012RUN248"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_19",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[7]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("04S7473_012", "04S7473_012RUN248"),]
+```
+<8> "05S7401_012" "05S7401_012RUN348" ---exclude "05S7401_012"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_20",caption="PCA plot for evaluating 05S7401_012 and 05S7401_012RUN348"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_20",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[8]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("05S7401_012", "05S7401_012RUN348"),]
+```
+<9> "09S7587_010" "09S7587_010RUN287" ---exclude "09S7587_010"
+```{r fig.cap=figure_nums_1(name="pcaplot_PBMCbaseline_BAL_21",caption="PCA plot for evaluating 09S7587_010 and 09S7587_010RUN287"),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="pcaplot_PBMCbaseline_BAL_21",display="full")`
+```{r fig.width=8,fig.height=8,eval=TRUE,cache=FALSE,webgl=TRUE,results='hide'}
+my.colors<-rep("red",ncol(fpkm.matrix.o))
+my.colors[kit.ids==rep.kitids[9]]<-"blue"
+### PCA
+open3d()
+par3d(windowRect=c(300, 300, 300, 300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix),n=ncol(data.matrix),plot=TRUE)
+mapsum.matrix[rownames(mapsum.matrix)%in% c("09S7587_010", "09S7587_010RUN287"),]
+```
+Based on the third round PCA, we can identify 10 outliers:
+```{r}
+outliers.r3<-c("01S7020_008","01S7312_004","03S7078_003","03S7227_011RUN287", "03S7227_011","04S7088_003","04S7472_011","04S7473_012","05S7401_012","09S7587_010")
+cat("outliers:",outliers.r3,sep="\n")
+```

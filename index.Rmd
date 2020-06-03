@@ -1,0 +1,29 @@
+---
+title: "Index page for GRADS SARC PBMC analysis"
+author: "Xiting Yan"
+date: "08/19/2019"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: yes
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+header-includes: \usepackage[dvips]{graphicx}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+This is the data analysis for the GRADS bulk RNAseq data of the PBMC samples in sarcoidosis patients.
+
+# Results
+
+1. [Data Preprocessing](rmarkdown/1_datapreprocessing.nb.html)
+1. PCA analysis
+  + [round 1-3](rmarkdown/PCA_preprocessing_XY.html)
