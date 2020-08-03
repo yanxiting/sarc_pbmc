@@ -1,0 +1,2 @@
+I started with two files to understand your approach: Preprocessing of the GRADS SARC PBMC data and PCA of the GRADS PBMC baseline expression data. I have not yet seen a file that describes your approach to the fastqc quality control checks. One specific question I had is whether you dropped samples based on the fastqc files. 
+my second question is related to the PCA file; were those data generated using the KPKM or raw read counts? 
