@@ -236,3 +236,23 @@ my.count.table<-log(my.count.table+1,base=2)
 
 cmd.out<-cbind(anno.matrix,my.count.table)
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+
+
+
+####################################
+# 5. generate the log(TPM+1,base=2) for the clean samples
+source("~/Rprogram/my_functions.R")
+data.filepath<-"/home/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/TPM_baseline_276_clean_GRADSID.txt"
+output.filepath<-"/home/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/log2TPM_baseline_276_clean_GRADSID.txt"
+
+# extract the raw count matrix
+count.table<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
+anno.matrix<-count.table[,1:5]
+count.table<-count.table[,6:ncol(count.table)]
+
+my.count.table<-count.table
+my.count.table<-log(my.count.table+1,base=2)
+
+cmd.out<-cbind(anno.matrix,my.count.table)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
