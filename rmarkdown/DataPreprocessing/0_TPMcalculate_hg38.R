@@ -79,11 +79,10 @@ idcorrection.matrix<-matrix(c(
 "03S7071_010","03B9078_016"),ncol=2,byrow=T)
 
 idcorrection.kitid.matrix<-matrix(sapply(idcorrection.matrix,my.element.extract,splitchar="_",index=1),nrow=nrow(idcorrection.matrix),byrow=F)
-
-#sample.names<-sapply(filenames,my.element.remove,splitchar="_",index=-1)
 sample.names<-filenames
-  
-count.table<-numeric()
+gene.names<-character()
+result.list<-list()
+annot.matrix<-character()
 
 for(i in 1:length(filenames)){
 cat("i=",i,"\n",sep="")
@@ -106,22 +105,26 @@ data.filepath<-file.path(data.dir,filenames[i],"Final.STARBowtie2_genes.out")
 }
 
 temp<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
-
-if(i==1){
-anno.matrix<-temp[,1:6]
-count.table<-cbind(count.table,temp[,7])
-gene.names<-paste(anno.matrix[,2],":",anno.matrix[,1],sep="")
-}else{
 rownames(temp)<-paste(temp[,2],":",temp[,1],sep="")
-temp<-temp[gene.names,]
-count.table<-cbind(count.table,temp[,7])
+result.list[[i]]<-temp
+
+temp.names<-setdiff(rownames(temp),gene.names)
+annot.matrix<-rbind(annot.matrix,temp[temp.names,1:5])
+gene.names<-union(gene.names,rownames(temp))
 }
 
-}
+names(result.list)<-sample.names
 
+count.table<-numeric()
+for(i in 1:length(result.list)){
+  count.table<-cbind(count.table,result.list[[i]][gene.names,7])
+}
+count.table[is.na(count.table)]<-0
 colnames(count.table)<-sample.names
+
 output.filepath<-"/home/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/TPM_corrected_all.txt"
-cmd.out<-cbind(anno.matrix,count.table)
+rownames(annot.matrix)<-paste(annot.matrix[,2],":",annot.matrix[,1],sep="")
+cmd.out<-cbind(annot.matrix[gene.names,],count.table)
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 
 
@@ -156,8 +159,8 @@ sample.list<-colnames(temp)[2:ncol(temp)]
 
 # extract the raw count matrix
 count.table<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
-anno.matrix<-count.table[,1:6]
-count.table<-count.table[,7:ncol(count.table)]
+anno.matrix<-count.table[,1:5]
+count.table<-count.table[,6:ncol(count.table)]
 
 my.count.table<-count.table[,sample.list]
 my.sample.names<-colnames(my.count.table)
@@ -193,8 +196,8 @@ mkey <- mkey[,1:5]
 
 # extract the raw count matrix
 count.table<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
-anno.matrix<-count.table[,1:6]
-count.table<-count.table[,7:ncol(count.table)]
+anno.matrix<-count.table[,1:5]
+count.table<-count.table[,6:ncol(count.table)]
 # remove the non PBMC samples
 count.table<-count.table[,substr(colnames(count.table),3,3)=="S"]
 
@@ -212,3 +215,24 @@ colnames(my.count.table)<-my.subject.id
 cmd.out<-cbind(anno.matrix,my.count.table)
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 
+
+
+
+
+
+####################################
+# 4. generate the log(TPM+1,base=2)
+source("~/Rprogram/my_functions.R")
+data.filepath<-"/home/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/TPM_baseline_allsamples_GRADSID.txt"
+output.filepath<-"/home/xy48/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/log2TPM_baseline_allsamples_GRADSID.txt"
+
+# extract the raw count matrix
+count.table<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
+anno.matrix<-count.table[,1:5]
+count.table<-count.table[,6:ncol(count.table)]
+
+my.count.table<-count.table
+my.count.table<-log(my.count.table+1,base=2)
+
+cmd.out<-cbind(anno.matrix,my.count.table)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
