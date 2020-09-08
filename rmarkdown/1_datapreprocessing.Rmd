@@ -473,6 +473,10 @@ cat("There are in total ",n1," baseline visits and ",n2," 6-month visits.\n",
 
 ```
 
+
+### TPM
+We also generated TPM and log2(TPM+1) using TPMCalculator from NIH. 
+
 ## 5. Extracting the clinical features
 The database that we received from GRADS study is the mysql dump files under `` `r file.path(home.dir,"/scratch/GRADS/SARC_results/Data/SARC_GRADS_data_20170712")` ``. 
 
