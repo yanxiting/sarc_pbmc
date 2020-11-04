@@ -1,0 +1,1041 @@
+---
+title: "WGCNA of SARC PBMC RNAseq data"
+author: "Xiting Yan"
+date: "10/02/2019"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+library(WGCNA)
+library(xlsx)
+
+knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+home.dir<-"/home/yanxiting/driver_Grace"
+source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+```
+
+
+# WGCNA on PBMC baseline
+
+Load in and match the clinical data,fpkm matrix, and the sample mapping matrix.
+```{r 0_CleanDataLoad.R,eval=FALSE,echo=TRUE,results='hide'}
+# /home/xy48/Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R
+home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/xy48"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+
+# load in the list of GRADS IDs and KIT IDs from the master key file
+mkey<-read.xls(masterkey.filepath,sheet=3,skip=2,header=T,check.names=F,stringsAsFactors = F)
+mkey <- mkey[,1:5]
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+data.matrix<-fpkm.matrix
+
+# remove the GRADS IDs that do not have the FPKMs
+temp.names<-colnames(fpkm.matrix)
+matched.list <- mkey[mkey[,1]%in%temp.names,]
+matched.list$`Phenotype/Genotype` <- as.factor(matched.list$`Phenotype/Genotype`)
+
+# generate a matrix that match the columns of data.matrix
+sample.matrix<-matched.list
+rownames(sample.matrix)<-sample.matrix[,1]
+sample.matrix<-sample.matrix[colnames(data.matrix),]
+
+```
+
+
+Load in clinical matrix and extract data for the variables needed to correlate with the gene modules. Some of the clinical featuers were also re-coded.
+```{r 6_0_DataLoad.R,eval=FALSE,echo=TRUE,results='hide'}
+#-------------------------------------------------------------------------------------------------# /Rprogram/GRADS_PBMC/WGCNA/6_0_DataLoad.R
+###################################################################
+#  Load in both the gene expression and the clinical data
+#  filter the genes based on given cv.threshold and match the gene expression data and the clinical data
+#home.dir<-"/home/xy48"
+home.dir<-"/home/yanxiting/driver_Grace"
+cv.threshold<-0
+source(file.path(home.dir,"Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R"))
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare",sep=""))
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)	
+}
+
+#=====================================================================================
+#
+#  Load in both the gene expression and the clinical data
+#  Filter the genes based on CV and match the gene expression and the clinical data
+#
+#=====================================================================================
+#clinic.filepath<-file.path(home.dir,"/home/yanxiting/Research/GRADS_SARC/Data/SARC_combine_clinical_data20170814.txt"
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[sample.matrix[,1],]
+
+##########for BAL samples
+# only keep genes expressed (fpkm>0.01 in >10% samples) across all samples
+bal.fpkm.matrix<-data.matrix
+bal.clinic.matrix<-clinic.matrix
+
+bal.fpkm.matrix<-bal.fpkm.matrix[apply(bal.fpkm.matrix>0.01,1,sum)>ncol(bal.fpkm.matrix)*0.1,]
+
+########## filter genes using SD>0 and genes using CV>cv.threshold################
+temp.sd<-apply(bal.fpkm.matrix,1,sd)
+bal.fpkm.matrix <- bal.fpkm.matrix[temp.sd>0,]
+
+temp.mean<-apply(bal.fpkm.matrix,1,mean)
+temp.sd<-apply(bal.fpkm.matrix,1,sd)
+temp.cv<-temp.sd/temp.mean
+
+my.data.matrix<-bal.fpkm.matrix[temp.cv>=cv.threshold,]
+
+library(WGCNA)
+collectGarbage()
+
+datExpr<-t(my.data.matrix)
+
+# remove certain columns in the clinical data
+datTraits<-bal.clinic.matrix[,-c(1,6,8,11:33,35:36,38:41)]
+datTraits$num_organ<-as.numeric(datTraits$num_organ)
+
+# add more variables
+#"ethor": binary
+#"num_organ": ordinal
+#"cd4":
+#"d125":
+
+#expecting: 
+#smoking
+#medication
+
+# change PHENGRP and SCADDING into numbers
+temp.vect<-datTraits[,"SCADDING"]
+temp.num<-as.numeric(factor(temp.vect,levels=c("0","I","II","III","IV","N/A")))
+temp.num[temp.num==6]<-NA
+datTraits[,"SCADDING"]<-temp.num
+
+# recode PHENGRP to treatment
+temp.vect<-datTraits[,"PHENGRP"] 
+temp.num<-rep(0,length(temp.vect)) # untreated all samples
+temp.num[temp.vect%in%c("Stage II-III, treated","Stage IV, treated")]<-1
+temp.num[temp.vect%in%c("Multi-organ","Cardiac defining therapy")]<-NA
+
+datTraits<-cbind(datTraits,temp.num)
+colnames(datTraits)[ncol(datTraits)]<-"TREATMENT"
+
+# add treatment for stage II-III
+temp.vect<-datTraits[,"PHENGRP"] 
+temp.num<-rep(0,length(temp.vect))
+temp.num[!temp.vect%in%c("Stage II-III, untreated","Stage II-III, treated" )]<-NA
+temp.num[temp.vect%in%c("Stage II-III, treated")]<-1
+
+datTraits<-cbind(datTraits,temp.num)
+colnames(datTraits)[ncol(datTraits)]<-"TREATMENT_STAGEII-III"
+
+# add treatment for stage IV
+temp.vect<-datTraits[,"PHENGRP"] 
+temp.num<-rep(0,length(temp.vect))
+temp.num[!temp.vect%in%c("Stage IV, treated","Stage IV, untreated")]<-NA
+temp.num[temp.vect%in%c("Stage IV, treated")]<-1
+
+datTraits<-cbind(datTraits,temp.num)
+colnames(datTraits)[ncol(datTraits)]<-"TREATMENT_STAGEIV"
+
+datTraits<-datTraits[,colnames(datTraits)!="PHENGRP"]
+
+# change RACE into a binary variable
+temp.vect<-datTraits[,"RACE"]
+temp.vect[!temp.vect%in%c(0,1)]<-NA
+datTraits[,"RACE"]<-temp.vect
+
+# add more group comparisons
+
+temp.names<-rownames(datTraits)
+datTraits<-t(datTraits)
+
+# change the names of the cell differentials
+rownames(datTraits)[rownames(datTraits)=="p_lymph"]<-"LYMBALD"
+rownames(datTraits)[rownames(datTraits)=="p_mono"]<-"MONOBALD"
+rownames(datTraits)[rownames(datTraits)=="p_neut"]<-"NEUBALD"
+rownames(datTraits)[rownames(datTraits)=="p_eos"]<-"EOSBALD"
+rownames(datTraits)[rownames(datTraits)=="p_baso"]<-"BASBALD"
+
+# check for the sum of cell differentials
+
+datTraits<-datTraits[c(
+"AGE",
+"GENDER",         
+"RACE",
+"BDFEV1",
+"FEV1PRED",
+"BDFVC",
+"FVCPRED",
+"BDDLCO",
+"PREDDLCO",
+"MONOBALD",
+"EOSBALD",
+"LYMBALD",
+"NEUBALD",
+"BASBALD",
+"SCADDING"
+),]
+
+# set the negative values in the trait matrix into NAs
+datTraits["LYMBALD",datTraits["LYMBALD",]==225.3]<-NA
+datTraits[datTraits<0]<-NA
+
+# set the cell differentials with 0 macrophages to be NAs
+#datTraits[,(!is.na(datTraits["ALVBALD",])) & #datTraits["ALVBALD",]==0][c("ALVBALD","EOSBALD","LYMBALD","NEUBALD"),]<-NA
+save.image(file.path(output.dir,"input_data.RData"))
+
+```
+
+
+Generate the hierarhical clustering tree using the genes to identify potential outliers.
+```{r 6_1_sampletree.R,eval=FALSE,echo=TRUE,results='hide'}
+#----------------------------------------------------------------------------------------------------------------------------------------------------
+# /Rprogram/GRADS_PBMC/WGCNA/6_1_sampletree.R
+rdata.filepath<-file.path(output.dir,"input_data.RData")
+library(WGCNA)
+
+#rdata.filepath<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary/WGCNA_BAL/PHGRP_filtering/CV0.4526_compare/input_data.RData"
+load(rdata.filepath)
+sampleTree = hclust(dist(datExpr), method = "average");
+
+# save the hierarchical tree before removing the outliers
+output.filepath<-file.path(output.dir,"hclust_tree_allsamples.eps")
+#sizeGrWindow(12,9)
+#pdf(file = output.filepath);
+postscript(output.filepath,width=10,height=10,paper="special")
+par(cex = 0.6);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5,
+cex.axis = 1.5, cex.main = 2,cex=0.55)
+#save plot
+dev.off()
+
+# output the heights on the tree so we can decide which heights to cut
+output.filepath<-file.path(output.dir,"sampletree_height_list.txt")
+cat(sampleTree$height,sep="\n",file=output.filepath,append=F)
+```
+
+
+We need to go over the sampletree_height_list.txt and the hcluste_tree_allsamples.eps to decide where to cut on the hierarchical clustering tree. The first number in the files should be a number larger than the largest number in sampletree_height_list.txt to make sure we also run the program without removing any samples. Then each number in the file should be slightly smaller than the actual number in sampletree_height_list.txt to make sure we cut underneath the branch. 
+
+We need to generate the hclust_cut_heights.list.txt to provide the heights at which we would like to cut the hierarchical clustering tree. Name of this file cannot be changed and it has to be saved under the same folder where all WGCNA results are saved.
+```{r 6_2_sftpicking.R,eval=FALSE,echo=TRUE,results='hide'}
+#----------------------------------------------------------------------------------------------------------------------------------------------------
+# /Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_2_sftpicking.R
+####################################################
+# load in all cut heights for a given cv.threshold, generate the soft power picking figures for each cut height
+#rdata.filepath<-""
+#cutheight.filepath<-""
+#output.dir<-""
+rdata.filepath<-file.path(output.dir,"input_data.RData")
+cutheight.filepath<-file.path(output.dir,"hclust_cut_heights_list.txt")
+library(WGCNA)
+load(rdata.filepath)
+enableWGCNAThreads(nThreads = 15)
+# load in the height vector
+#height.vect<-c(50000,48000,38080,37970,33640,25100,23700,19260,18260)
+height.vect<-scan(cutheight.filepath)
+
+sampleTree = hclust(dist(datExpr), method = "average")
+
+outlier.list<-list()
+outlier.list[[1]]<-character()
+for(i in 1:length(height.vect)){
+clust = cutreeStatic(sampleTree, cutHeight = height.vect[i], minSize = 10)
+keepSamples = (clust==1)
+outlier.list[[i]]<-setdiff(rownames(datExpr)[!keepSamples],unlist(outlier.list))
+}
+
+# output the height of cut, the number of outliers and the IDs of the outliers into one file
+cmd.out<-cbind(height.vect,unlist(lapply(outlier.list,length)),unlist(lapply(outlier.list,paste,collapse=";")))
+colnames(cmd.out)<-c("cut_height","outlier_number","outliers_ids")
+output.filepath<-file.path(output.dir,"cutheight_2_sft.txt")
+write.table(cmd.out,sep="\t",file=output.filepath,append=F,quote=F,row.names=F,col.names=T)
+
+
+####################################################
+# 6.1 for each given cut height, generate the soft power picking figures to pick soft power for each given cut height 
+# save the soft power picking figure into the same file for reviewing
+pdf.filepath<-file.path(output.dir,"sft_picking.pdf")
+pdf(pdf.filepath)
+for(i in 1:length(outlier.list)){
+#clust = cutreeStatic(sampleTree, cutHeight = height.vect[i], minSize = 10)
+#keepSamples = (clust==1)
+my.datExpr = datExpr[setdiff(rownames(datExpr),unlist(outlier.list[1:i])), ]
+
+
+#rename the columns (remove all after _ in sample name)
+SarcaleSamples = rownames(my.datExpr)
+sampleRows =match(SarcaleSamples,rownames(sample.matrix));
+sample.matrix.new=sample.matrix[sampleRows,]
+traitRows = match(sample.matrix.new[,1],colnames(datTraits));
+my.datTraits = datTraits[,traitRows];
+
+nGenes = ncol(my.datExpr)
+nSamples = nrow(my.datExpr)
+
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(my.datExpr, powerVector = powers, verbose = 5)
+
+
+# save the plot for picking the soft power
+#output.filepath<-file.path(output.dir,"SoftPowerPick.eps")
+#postscript(output.filepath,width=9,height=5,paper="special")
+#sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",
+ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity\n","outlier.list[",i,"]",sep=""))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers,
+cex=cex1,col="red")
+#output.filepath<-file.path(output.dir,"SoftPowerPick.jpg")
+#savePlot(output.filepath,type="jpeg")
+#dev.off()
+
+}
+dev.off()
+
+save.image(file.path(output.dir,"sft_picking.RData"))
+```
+
+
+We need to review the plots in sft_picking.pdf and generate a text file with each line describing the softpower we want to set for each cut height we picked before. This text file will be saved as sft_power_list.txt. The numbers will be in the same order as those plots in the sft_picking.pdf. 
+```{r 6_3_clustering.R,eval=FALSE,echo=TRUE,results='hide'}
+#---------------------------------------------------------------------------------------------------------------------------------------------------
+# /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R
+rdata.filepath<-file.path(output.dir,"sft_picking.RData")
+sftpower.filepath<-file.path(output.dir,"sft_power_list.txt")
+load(rdata.filepath)
+#output.dir<-""
+#sftpower.filepath<-""
+
+library(WGCNA)
+enableWGCNAThreads(nThreads = 15)
+library(gplots)
+
+
+my.cor.dist<-function(x,method.name="spearman"){
+# calculate the correlation between rows in x and return the correlation matrix as a distance matrix
+y<-cor(t(x),method=method.name)
+y[is.na(y)]<- -1.5
+return(as.dist(1-y))
+}
+
+
+# for each element in outlier.list, pick power and put them in power.vect below for further analysis
+#power.vect<-c(3,4,5,3,4,3,3,3,4)
+power.vect<-scan(sftpower.filepath)
+
+net.list<-list()
+# obtain the WGCNA results for each given set of outliers
+for(i in 1:length(outlier.list)){
+gc()
+cat("i=",i,"\n",sep="")
+#clust = cutreeStatic(sampleTree, cutHeight = height.vect[i], minSize = 10)
+#keepSamples = (clust==1)
+my.datExpr = datExpr[setdiff(rownames(datExpr),unlist(outlier.list[1:i])), ]
+
+#rename the columns (remove all after _ in sample name)
+SarcaleSamples = rownames(my.datExpr)
+sampleRows =match(SarcaleSamples,rownames(sample.matrix));
+sample.matrix.new=sample.matrix[sampleRows,]
+traitRows = match(sample.matrix.new[,1],colnames(datTraits));
+my.datTraits = datTraits[,traitRows];
+
+nGenes = ncol(my.datExpr)
+nSamples = nrow(my.datExpr)
+
+# select the power based on the plot above
+power.selected<-power.vect[i]
+net = blockwiseModules(my.datExpr, power = power.selected, minModuleSize = 10, maxBlockSize = 30000,
+reassignThreshold = 0, mergeCutHeight = 0.25,
+numericLabels = TRUE, pamRespectsDendro = FALSE,
+saveTOMs = FALSE,
+#saveTOMFileBase = paste("CV",cv.threshold,"outlier",i,sep=""),
+verbose = 3,nThreads=4)
+net.list[[i]]<-net
+
+
+#------------------------------------
+# plot the distance matrix by WGCNA
+dissTOM = 1-TOMsimilarityFromExpr(my.datExpr, power = power.selected)
+plotTOM = dissTOM^7
+diag(plotTOM) = NA
+
+output.filepath<-file.path(output.dir,paste("heatmap_module_outliers_",i,".eps",sep=""))
+postscript(output.filepath,width=15,height=15,paper="special")
+#sizeGrWindow(15,15)
+temp.error<-try(TOMplot(plotTOM[net$goodGenes,net$goodGenes], net$dendrograms[[1]], labels2colors(net$colors)[net$goodGenes],
+main = paste("Network heatmap plot, CV>=",cv.threshold,sep="")))
+
+#output.filepath<-file.path(output.dir,paste("heatmap_modules_CV_no_log2_without_outlier",cv.threshold,".jpg",sep=""))
+#savePlot(output.filepath,type="jpeg")
+dev.off()
+
+
+#--------------------------------------
+# plot the dendrogram
+output.filepath<-file.path(output.dir,paste("dendrogram_modules_outliers_",i,".eps",sep=""))
+postscript(output.filepath,width=20,height=12,paper="special")
+#sizeGrWindow(12, 9)
+# Convert labels to colors for plotting
+mergedColors = labels2colors(net$colors)
+# Plot the dendrogram and the module colors underneath
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+"Module\n colors",
+rowText = mergedColors[net$blockGenes[[1]]],
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+cex.main = 2, cex.axis = 1.4, cex.lab = 1.4,
+cex.colorLabels = 1.2,
+marAll= c(0, 5, 3, 3))
+#savePlot(output.filepath,type="jpeg")
+dev.off()
+
+#----------------------------------------
+# calculate the correltion between the eigen genes of the modules to see if we need to change the mergeCutHeight
+MEList.test<-moduleEigengenes(my.datExpr,colors=mergedColors)
+MEs.test<-MEList.test$eigengenes
+MEDiss.test<-1-cor(MEs.test)
+METree.test=hclust(as.dist(MEDiss.test),method="average")
+
+#sizeGrWindow(7,6)
+output.filepath<-file.path(output.dir,paste("hclust_modules_outliers_",i,".eps",sep=""))
+postscript(output.filepath,width=20,height=12,paper="special")
+plot(METree.test,main="Clustering of module eigengenes",xlab="",sub="")
+abline(h=0.25,col="red")
+dev.off()
+
+output.filepath<-file.path(output.dir,paste("correlation_modules_outliers_",i,".txt",sep=""))
+cat("\t",file=output.filepath,apend=F)
+write.table(1-MEDiss.test,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+#-----------------------------------------------
+# plot the correlation between the modules with the clinical traits
+#datExpr<-data.matrix[clustering.result==i,ps.names]
+#datTraits<-as.data.frame(t(my.clinic.data[,clustering.result==i]))
+nGenes = ncol(my.datExpr);
+nSamples = nrow(my.datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(my.datExpr, labels2colors(net$colors))$eigengenes
+MEs = orderMEs(MEs0)
+cp = bicorAndPvalue(MEs, t(my.datTraits))
+moduleTraitCor = cp$bicor;
+moduleTraitPvalue = cp$p;
+
+output.filepath<-file.path(output.dir,paste("heatmap_trait_correlation_modules_outliers_",i,".eps",sep=""))
+#pdf(file = output.filepath,width = 15,height = 9,paper="special")
+postscript(output.filepath,width=15,height=24,paper="special")
+#sizeGrWindow(15,9)
+#pdf(file="Plots/moduleTraitRelationships.pdf", width=10, height=6);
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(12, 12, 3, 1));
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+xLabels = rownames(my.datTraits[]),
+yLabels = names(MEs),
+ySymbols = names(MEs),
+colorLabels = FALSE,
+colors = greenWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"))
+#savePlot(output.filepath,type="jpeg")
+dev.off()
+
+
+
+
+output.filepath<-file.path(output.dir,paste("heatmap_trait_correlation_modules_outliers_",i,"_pvaluesig.eps",sep=""))
+#pdf(file = output.filepath,width = 15,height = 9,paper="special")
+postscript(output.filepath,width=18,height=18,paper="special")
+#sizeGrWindow(15,9)
+#pdf(file="Plots/moduleTraitRelationships.pdf", width=10, height=6);
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(12, 12, 3, 1));
+# Display the correlation values within a heatmap plot
+temp.moduleTraitPvalue<-moduleTraitPvalue
+temp.moduleTraitCor<-moduleTraitCor
+temp.moduleTraitCor[temp.moduleTraitPvalue>0.05]<-NA
+
+labeledHeatmap(Matrix = temp.moduleTraitCor,
+xLabels = rownames(my.datTraits[]),
+yLabels = names(MEs),
+ySymbols = names(MEs),
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+#cex.text=0.8,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"),
+naColor="white")
+#savePlot(output.filepath,type="jpeg")
+dev.off()
+
+#----------------------------------------
+# output the module membership for all genes
+output.filepath<-file.path(output.dir,paste("module_assignment_outliers_",i,".txt",sep=""))
+ps.names<-rownames(my.data.matrix)
+gene.names<-unname(sapply(ps.names,my.element.remove,splitchar="_",index=-1))
+cmd.out<-cbind(ps.names,gene.names,labels2colors(net$colors))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=F,quote=F)
+
+#--------------------------------
+# output the module membership and the gene significance for each module
+nGenes = ncol(my.datExpr);
+nSamples = nrow(my.datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(my.datExpr, labels2colors(net$colors))$eigengenes
+MEs = orderMEs(MEs0)
+
+geneModuleMembership = as.data.frame(cor(my.datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+
+geneTraitSignificance = as.data.frame(cor(my.datExpr, t(my.datTraits), use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+
+# output the gene module membership together with their p values
+modNames=substring(names(MEs), 3)
+output.subdir<-file.path(output.dir,paste("ModuleMembership_GSPvalue_outliers_",i,sep=""))
+if(file.exists(output.subdir)==F){
+dir.create(output.subdir)	
+}
+for(k in 1:length(modNames)){
+output.filepath<-file.path(output.subdir,paste("Module_",modNames[k],"_membership_gsig.txt",sep=""))
+ps.names<-rownames(my.data.matrix)
+gene.names<-unname(sapply(ps.names,my.element.remove,splitchar="_",index=-1))
+temp.color.desig<-labels2colors(net$colors)
+cmd.out<-cbind(ps.names[temp.color.desig==modNames[k]],gene.names[temp.color.desig==modNames[k]],geneModuleMembership[temp.color.desig==modNames[k],colnames(geneModuleMembership)==paste("ME",modNames[k],sep="")],MMPvalue[temp.color.desig==modNames[k],colnames(MMPvalue)==paste("ME",modNames[k],sep="")],geneTraitSignificance[temp.color.desig==modNames[k],],GSPvalue[temp.color.desig==modNames[k],])
+colnames(cmd.out)<-c("ps_names","gene_names","module_membership","module_membership_pvalue",paste("gs_",rownames(my.datTraits),sep=""),paste("gs_",rownames(my.datTraits),"_pvalue",sep=""))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+}
+
+#-----------------------------------------------------------
+# output the data matrix and the heatmap for the gene expression levels in each module and hierarchical clusteirng of the samples using genes from each module separately
+
+modNames=substring(names(MEs), 3)
+output.subdir<-file.path(output.dir,paste("ModuleClustering_outliers_",i,sep=""))
+if(file.exists(output.subdir)==F){
+dir.create(output.subdir)
+}
+
+for(k in 1:length(modNames)){
+output.filepath<-file.path(output.subdir,paste("Module_",modNames[k],"_nooutliers_fpkm.txt",sep=""))
+ps.names<-rownames(my.data.matrix)
+gene.names<-unname(sapply(ps.names,my.element.remove,splitchar="_",index=-1))
+temp.color.desig<-labels2colors(net$colors)
+cmd.out<-my.data.matrix[temp.color.desig==modNames[k],rownames(my.datExpr)]
+#cmd.out<-cmd.out[hclust(my.cor.dist(cmd.out))$order,]
+cat("tracking_id\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+#temp.breaks<-c(0.01,seq(from=0.01,to=10,length=499),10.1)
+output.filepath<-file.path(output.subdir,paste("Heatmap_Module_",modNames[k],"_nooutliers_fpkm_original.eps",sep=""))
+postscript(output.filepath)
+temp.breaks<-seq(from=as.numeric(quantile(as.matrix(cmd.out),prob=0.05)),to=as.numeric(quantile(as.matrix(cmd.out),prob=0.95)),length=501)
+heatmap.2(as.matrix(cmd.out),distfun=my.cor.dist,hclustfun=function(d){return(hclust(d,method="complete"))},breaks=temp.breaks,scale="none",Rowv=TRUE,Colv=TRUE,col=colorpanel(500,low="black",high="red"),cexCol=1,trace="none",density.info="none",key=TRUE,symkey=FALSE,keysize=0.8,labRow="",na.color="grey",main=paste("Module ",modNames[k],sep=""))
+dev.off()
+
+output.filepath<-file.path(output.subdir,paste("Heatmap_Module_",modNames[k],"_nooutliers_fpkm_centered.eps",sep=""))
+postscript(output.filepath)
+cmd.out<-my.normalize(cmd.out)
+temp.breaks<-seq(from=as.numeric(quantile(as.matrix(cmd.out),prob=0.05)),to=as.numeric(quantile(as.matrix(cmd.out),prob=0.95)),length=501)
+#temp.heatmap<-heatmap.2(as.matrix(cmd.out),distfun=my.cor.dist,breaks=temp.breaks,scale="none",Rowv=TRUE,Colv=TRUE,col=colorpanel(500,low="purple",high="yellow",mid="grey"),cexCol=1,trace="none",density.info="none",key=TRUE,symkey=FALSE,keysize=0.8,labRow="",na.color="grey",main=paste("Module ",modNames[k],sep=""))
+temp.heatmap<-heatmap.2(as.matrix(cmd.out),distfun=my.cor.dist,hclustfun=function(d){return(hclust(d,method="complete"))},breaks=temp.breaks,scale="none",Rowv=TRUE,Colv=TRUE,col=colorpanel(500,low="purple",high="yellow",mid="grey"),cexCol=1,trace="none",density.info="none",key=TRUE,symkey=FALSE,keysize=0.8,labRow="",na.color="grey",main=paste("Module ",modNames[k],sep=""))
+dev.off()
+
+output.filepath<-file.path(output.subdir,paste("HclustTree_Module_",modNames[k],"_nooutliers_fpkm_centered.eps",sep=""))
+postscript(output.filepath)
+d <- my.cor.dist(as.matrix(t(cmd.out))) 
+# apply hirarchical clustering 
+hc <- hclust(d,method="complete")     
+plot(hc,main=paste("Module ",modNames[k],sep=""),cex=0.3) 
+dev.off()
+
+
+output.filepath<-file.path(output.subdir,paste("HclustTreeHeatmap2_Module_",modNames[k],"_nooutliers_fpkm_centered.eps",sep=""))
+postscript(output.filepath,width=40,height=20)
+plot(temp.heatmap$colDendrogram,main=paste("Module ",modNames[k],sep=""),cex=0.3) 
+dev.off()
+
+}
+
+
+modNames=substring(names(MEs), 3)
+output.subdir<-file.path(output.dir,paste("ModuleClustering_outliers_",i,sep=""))
+if(file.exists(output.subdir)==F){
+dir.create(output.subdir)
+}
+
+for(k in 1:length(modNames)){
+output.filepath<-file.path(output.subdir,paste("Module_",modNames[k],"_ALL_fpkm.txt",sep=""))
+ps.names<-rownames(my.data.matrix)
+gene.names<-unname(sapply(ps.names,my.element.remove,splitchar="_",index=-1))
+temp.color.desig<-labels2colors(net$colors)
+cmd.out<-my.data.matrix[temp.color.desig==modNames[k],]
+#cmd.out<-cmd.out[hclust(my.cor.dist(cmd.out))$order,]
+cat("tracking_id\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+#temp.breaks<-c(0.01,seq(from=0.01,to=10,length=499),10.1)
+output.filepath<-file.path(output.subdir,paste("Heatmap_Module_",modNames[k],"_ALL_fpkm_original.eps",sep=""))
+postscript(output.filepath)
+temp.breaks<-seq(from=as.numeric(quantile(as.matrix(cmd.out),prob=0.05)),to=as.numeric(quantile(as.matrix(cmd.out),prob=0.95)),length=501)
+heatmap.2(as.matrix(cmd.out),distfun=my.cor.dist,hclustfun=function(d){return(hclust(d,method="complete"))},breaks=temp.breaks,scale="none",Rowv=TRUE,Colv=TRUE,col=colorpanel(500,low="black",high="red"),cexCol=1,trace="none",density.info="none",key=TRUE,symkey=FALSE,keysize=0.8,labRow="",na.color="grey",main=paste("Module ",modNames[k],sep=""))
+#heatmap.2(cmd.out,scale="row",Rowv=TRUE,Colv=FALSE,col=colorpanel(500,low="blue",mid="white",high="red"),cexCol=1,trace="none",density.info="none",keysize=0.8,margins=c(7,5.5))
+dev.off()
+
+output.filepath<-file.path(output.subdir,paste("Heatmap_Module_",modNames[k],"_ALL_fpkm_centered.eps",sep=""))
+postscript(output.filepath)
+cmd.out<-my.normalize(cmd.out)
+temp.breaks<-seq(from=as.numeric(quantile(as.matrix(cmd.out),prob=0.05)),to=as.numeric(quantile(as.matrix(cmd.out),prob=0.95)),length=501)
+temp.heatmap<-heatmap.2(as.matrix(cmd.out),distfun=my.cor.dist,hclustfun=function(d){return(hclust(d,method="complete"))},breaks=temp.breaks,scale="none",Rowv=TRUE,Colv=TRUE,col=colorpanel(500,low="purple",high="yellow",mid="grey"),cexCol=1,trace="none",density.info="none",key=TRUE,symkey=FALSE,keysize=0.8,labRow="",na.color="grey",main=paste("Module ",modNames[k],sep=""))
+#heatmap.2(cmd.out,scale="row",Rowv=TRUE,Colv=FALSE,col=colorpanel(500,low="blue",mid="white",high="red"),cexCol=1,trace="none",density.info="none",keysize=0.8,margins=c(7,5.5))
+dev.off()
+
+
+output.filepath<-file.path(output.subdir,paste("HclustTree_Module_",modNames[k],"_ALL_fpkm_centered.eps",sep=""))
+postscript(output.filepath)
+d <- my.cor.dist(as.matrix(t(cmd.out))) 
+# apply hirarchical clustering 
+hc <- hclust(d,method="complete")     
+plot(hc,main=paste("Module ",modNames[k],sep=""),cex=0.3) 
+dev.off()
+
+
+output.filepath<-file.path(output.subdir,paste("HclustTreeHeatmap2_Module_",modNames[k],"_ALL_fpkm_centered.eps",sep=""))
+postscript(output.filepath,width=40,height=20)
+plot(temp.heatmap$colDendrogram,main=paste("Module ",modNames[k],sep=""),cex=0.3) 
+dev.off()
+
+}
+
+
+
+#--------------------------------------------
+# output a table to show the number of genes for each module
+output.filepath<-file.path(output.dir,paste("genenum_per_module_outliers_",i,".txt",sep=""))
+ps.names<-rownames(my.data.matrix)
+gene.names<-unname(sapply(ps.names,my.element.remove,splitchar="_",index=-1))
+temp.color.desig<-labels2colors(net$colors)
+cmd.out<-as.matrix(table(temp.color.desig))
+cat("module_names\tgene_num\n",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",col.names=F,row.names=T,quote=F)
+}
+
+# visualize and measure the similarity between different clustering results
+module.labels.list<-list()
+module.colors.list<-list()
+
+module.labels.list[[1]]<-net.list[[1]]$colors
+module.colors.list[[1]]<-labels2colors(module.labels.list[[1]])
+
+for(i in 2:length(net.list)){
+module.labels.list[[i]]<-matchLabels(net.list[[i]]$colors,module.labels.list[[1]])
+module.colors.list[[i]]<-labels2colors(module.labels.list[[i]])
+}
+
+# remove genes that were considered as bad genes by net.list[[1]]
+my.module.colors.list<-list()
+for(i in 1:length(net.list)){
+my.module.colors.list[[i]]<-module.colors.list[[i]][net.list[[1]]$goodGenes]
+}
+
+geneTree = net.list[[1]]$dendrograms[[1]]
+output.filepath<-file.path(output.dir,"dendrogram_outliers_compare.eps")
+postscript(output.filepath,width=12,height=24,paper="special")
+#postscript(output.filepath)
+plotDendroAndColors(geneTree,
+				matrix(unlist(my.module.colors.list),nrow=length(my.module.colors.list[[1]]),byrow=F),
+				cumsum(unlist(lapply(outlier.list,length))),
+                  main = "comparing gene dendrogram",
+                  dendroLabels = FALSE, hang = 0.03,
+                  addGuide = TRUE, guideHang = 0.05)
+dev.off()
+
+save.image(file.path(output.dir,"wgcna_cutheights.RData"))
+```
+
+```{r 6_WGCNA_new.R,eval=FALSE,echo=TRUE,results='hide'}
+#---------------------------------------------------------------------------------------------------------------------------------------------------
+# /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_WGCNA_new.R
+####################
+# 6.3  for the set of potential outlier, evaluate the effect of these outliers on the WGCNA results
+
+# generate the file to show the CV quantiles.
+#dataload.filepath<-"/home/fas/kaminski/xy48/Rprogram/GRADS/BAL_final_20170724/WGCNA_PHGRPfiltering/6_0_DataLoad.R"
+#dataload.filepath<-"/home/fas/kaminski/xy48/Rprogram/GRADS/BAL_final_20170724/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
+dataload.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
+output.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)	
+}
+
+cv.threshold<-0
+
+source("/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/0_CleanDataLoad.R")
+output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare",sep=""))
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)	
+}
+
+#=====================================================================================
+#
+#  Load in both the gene expression and the clinical data
+#  Filter the genes based on CV and match the gene expression and the clinical data
+#
+#=====================================================================================
+
+#clinic.filepath<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Data/SARC_combine_clinical_data20170814.txt"
+clinic.filepath<-"/home/yanxiting/Research/GRADS_SARC/Data/SARC_combine_clinical_data20170814.txt"
+clinic.matrix=read.table(clinic.filepath,header=T,sep="\t",check.names=F,stringsAsFactors=F,quote = "")
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[sample.matrix[,1],]
+
+##########for BAL samples
+# only keep genes expressed (fpkm>0.01 in >10% samples) across all samples
+bal.fpkm.matrix<-data.matrix[,substr(colnames(data.matrix),3,3)=="B"]
+bal.clinic.matrix<-clinic.matrix[substr(colnames(data.matrix),3,3)=="B",]
+
+bal.fpkm.matrix<-bal.fpkm.matrix[apply(bal.fpkm.matrix>0.01,1,sum)>ncol(bal.fpkm.matrix)*0.1,] # 30130 genes reduced to 20828 genes
+
+########## filter genes using SD>0 and genes using CV>cv.threshold################
+
+temp.sd<-apply(bal.fpkm.matrix,1,sd)
+bal.fpkm.matrix <- bal.fpkm.matrix[temp.sd>0,]
+
+temp.mean<-apply(bal.fpkm.matrix,1,mean)
+temp.sd<-apply(bal.fpkm.matrix,1,sd)
+temp.cv<-temp.sd/temp.mean
+
+my.data.matrix<-bal.fpkm.matrix[temp.cv>=cv.threshold,]
+
+
+# output the proportion, the number of genes remain and the quantiles of the CV into one file
+cat("percentile\t# of genes\tCV_quantile\n",file=file.path(output.dir,"/../bal_cv_quantiles.txt"),append=F)
+write.table(cbind(seq(from=0,to=1,by=0.01),length(temp.cv)*(1-seq(from=0,to=1,by=0.01)),quantile(temp.cv,prob=seq(from=0,to=1,by=0.01))),file=file.path(output.dir,"/../bal_cv_quantiles.txt"),sep="\t",append=T,quote=F,row.names=F,col.names=F)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##########################
+# 6.3.0 load the data into R and save the workspace for further analysis
+#dataload.filepath<-"/home/fas/kaminski/xy48/Rprogram/GRADS/BAL_final_20170724/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
+dataload.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
+# choose the following CV threshold using the bal_quantile.txt generated above
+#cv.threshold.vect<-c(0,0.2360,0.2888,0.3483,0.4384,0.5717,0.7019,0.8537,1.0571,1.4615)
+cv.threshold.vect<-0
+#output.dir<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary/WGCNA_BAL/unadjusted_ALL_filtering"
+output.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
+
+script.dir<-file.path(output.dir,"scripts_dataload_outliercompare")
+if(file.exists(script.dir)==F){
+dir.create(script.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(cv.threshold.vect)){
+	
+cv.threshold<-cv.threshold.vect[i]
+script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
+#cmd.out<-paste("#BSUB -q kaminski -n 1 -M 8000 -R \"span[ptile=1] rusage[mem=8000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
+#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1","\n","#SBATCH --mem=16000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
+#cmd.out<-paste(cmd.out,"/usr/bin/R --vanilla<<EOF\n",sep="")
+cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
+cmd.out<-paste(cmd.out,"cv.threshold<-",cv.threshold,"\n",sep="")
+cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"source(\"",dataload.filepath,"\")\n",sep="")
+cmd.out<-paste(cmd.out,"EOF\n",sep="")
+cat(cmd.out,file=script.filepath,append=F)
+system(paste("chmod 700 ",script.filepath,sep=""))
+#cat("bsub < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+
+}
+system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
+
+
+
+
+
+
+
+
+
+
+# 6.3.1 for each cv.threshold, generate the hclust tree for review by eyes to decide potential heights of cut on the tree
+r.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_1_sampletree.R"
+data.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
+#cv.threshold.vect<-c(0,0.2565,0.3148,0.3844,0.5058,0.6651,0.8375,1.0666,1.5233,3.4702)
+cv.threshold.vect<-0
+script.dir<-file.path(data.dir,"scripts_sampletree_outliercompare")
+if(file.exists(script.dir)==F){
+dir.create(script.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(cv.threshold.vect)){
+	
+cv.threshold<-cv.threshold.vect[i]
+script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
+#cmd.out<-paste("#BSUB -q kaminski -n 1 -M 8000 -R \"span[ptile=1] rusage[mem=8000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
+#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1","\n","#SBATCH --mem=16000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
+#cmd.out<-paste(cmd.out,"/usr/bin/R --vanilla<<EOF\n",sep="")
+cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
+cmd.out<-paste(cmd.out,"rdata.filepath<-\"",file.path(data.dir,paste("CV",cv.threshold,"_compare",sep=""),"input_data.RData"),"\"\n",sep="")
+cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
+cmd.out<-paste(cmd.out,"EOF\n",sep="")
+cat(cmd.out,file=script.filepath,append=F)
+system(paste("chmod 700 ",script.filepath,sep=""))
+cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+
+}
+system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
+
+
+
+
+
+
+
+
+
+
+
+# 6.3.2 review the tree from 6.3.1 and generate a file (hclust_cut_heights_list.txt) containing the potential cut heights for each given cv.threshold
+#		the first height in hclust_cut_heights_list.txt has to be higher than the biggest height in sampletree_height_list.txt
+#		for each cv.threshold and each given cut height, generate the soft power picking figure to pick soft power
+r.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_2_sftpicking.R"
+data.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
+cv.threshold.vect<-0
+
+script.dir<-file.path(data.dir,"scripts_sftpicking_outliercompare")
+if(file.exists(script.dir)==F){
+dir.create(script.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(cv.threshold.vect)){
+cv.threshold<-cv.threshold.vect[i]
+
+output.dir<-file.path(data.dir,paste("CV",cv.threshold,"_compare",sep=""))
+rdata.filepath<-file.path(output.dir,"input_data.RData")
+cutheight.filepath<-file.path(output.dir,"hclust_cut_heights_list.txt")
+
+script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
+#cmd.out<-paste("#BSUB -q kaminski -n 10 -M 64000 -R \"span[ptile=10] rusage[mem=64000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
+#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=10","\n","#SBATCH --mem=64000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
+#cmd.out<-paste(cmd.out,"/usr/bin/R --vanilla<<EOF\n",sep="")
+cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
+cmd.out<-paste(cmd.out,"rdata.filepath<-\"",rdata.filepath,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"cutheight.filepath<-\"",cutheight.filepath,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
+cmd.out<-paste(cmd.out,"EOF\n",sep="")
+cat(cmd.out,file=script.filepath,append=F)
+system(paste("chmod 700 ",script.filepath,sep=""))
+cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+
+}
+system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
+
+
+# 6.3.3 review the soft power picking figure and pick the soft power for final analysis to save it in the file sft_power_list.txt
+r.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R"
+data.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
+#cv.threshold.vect<-c(0,1,1.5,2,2.5,3,3.5,4)
+cv.threshold.vect<-0
+
+script.dir<-file.path(data.dir,"scripts_clustering_outliercompare")
+if(file.exists(script.dir)==F){
+dir.create(script.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(cv.threshold.vect)){
+cv.threshold<-cv.threshold.vect[i]
+
+output.dir<-file.path(data.dir,paste("CV",cv.threshold,"_compare",sep=""))
+rdata.filepath<-file.path(output.dir,"sft_picking.RData")
+sftpower.filepath<-file.path(output.dir,"sft_power_list.txt")
+
+script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
+#cmd.out<-paste("#BSUB -q kaminski -n 10 -M 64000 -R \"span[ptile=10] rusage[mem=64000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
+#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=10","\n","#SBATCH --mem=64000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
+#cmd.out<-paste(cmd.out,"R --vanilla<<EOF\n",sep="")
+cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
+cmd.out<-paste(cmd.out,"rdata.filepath<-\"",rdata.filepath,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"sftpower.filepath<-\"",sftpower.filepath,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
+cmd.out<-paste(cmd.out,"EOF\n",sep="")
+cat(cmd.out,file=script.filepath,append=F)
+system(paste("chmod 700 ",script.filepath,sep=""))
+cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+
+}
+system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
+```
+
+The hierarhical clustering tree of all the samples is shown in `r figure_nums_1(name="hclust_unadjusted_1",display="cite")`
+```{r fig.cap=figure_nums_1(name="hclust_unadjusted_1",caption="Hierarhical clustering tree of all the samples for the unadjusted data."),echo=TRUE,cache=FALSE,results='hide'}
+wgcna.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare"
+```
+`r figure_nums_1(name="hclust_unadjusted_1")`
+```{r}
+knitr::include_graphics(file.path(wgcna.dir,"hclust_tree_allsamples.jpg"))
+```
+We identified 7 different cutting heights on the hierarchical clustering tree including the height that does not remove any samples. These chosen cutting heights and their corresponding number of identified outliers and the list of outliers are shown in `r table_nums_1("wgcna_cutheights_table_1",display="cite")`. 
+```{r}
+#data.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/cutheight_2_sft.txt"
+data.filepath<-file.path(wgcna.dir,"cutheight_2_sft.txt")
+temp.matrix<-read.table(data.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=FALSE)
+for(i in 1:nrow(temp.matrix)){
+  if(i==1){
+    next
+  }
+  temp.names<-temp.matrix[i-1,3]
+
+  if(temp.names!=""){
+    temp.names<-paste(temp.names,temp.matrix[i,3],sep=";")
+  }else{
+    temp.names<-temp.matrix[i,3]
+  }
+  temp.matrix[i,3]<-temp.names
+}
+
+temp.matrix[,2]<-cumsum(temp.matrix[,2])
+
+kable(temp.matrix,digits = 4,row.names=FALSE,caption=table_nums_1(name="wgcna_cutheights_table_1",caption="Table of the chosen cutting heights on the hierarchical clustering tree for the unadjusted data and their corresponding number of outliers and the list of outliers.")) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive"), full_width=FALSE,position="left") 
+#write.table(temp.matrix,sep="\t",row.names=F,col.names=T,quote=F)
+```
+
+The WGCNA results of these 7 chosen cutting heights are compared and shown in `r figure_nums_1("wgcna_compare_unadjusted",display="cite")`.
+
+```{r fig.cap=figure_nums_1(name="wgcna_compare_unadjusted",caption="Heatmap comparing the clustering results of the 7 chosen cutting heights for the unadjusted data."),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="wgcna_compare_unadjusted")`
+```{r}
+knitr::include_graphics(file.path(wgcna.dir,"dendrogram_outliers_compare.jpg"))
+```
+
+Based on the comparison in `r figure_nums_1("wgcna_compare_unadjusted",display="cite")`, we decided to use the cutting height=21342 which defined 8 outliers for the WGCNA analysis. The identified gene modules and their correlation with the given clinical trais are shown in .
+
+```{r fig.cap=figure_nums_1(name="wgcna_unadjusted_heatmap_1",caption="Heatmap showing the correlation between the identified gene modules and the clinical traits for the unadjusted data."),echo=FALSE,cache=FALSE,results='hide'}
+```
+`r figure_nums_1(name="wgcna_unadjusted_heatmap_1")`
+```{r}
+knitr::include_graphics(file.path(wgcna.dir,"heatmap_trait_correlation_modules_outliers_withratio_7_pvaluesig.jpg"))
+```
+
+```{r results='hide'}
+data.filepath<-file.path(wgcna.dir,"wgcna_cutheights.RData")
+load(data.filepath)
+net<-net.list[[7]]
+```
+
+The WGCNA analysis identified `r length(unique(net$colors))` gene modules and the size of these modules ranges from `r min(table(net$colors))` to `r max(table(net$colors))`. The results in `r figure_nums_1("wgcna_unadjusted_heatmap_1",display="cite")` provided the following observations:
+
+1. The demographics variables(age, gender and race) are correlated with very limited number of gene modules. There is only one gene module (**MEbrown4**) that is strongly correlated with gender and this module is also correated with the absolute BDFEV1, BDFVC and BDDLCO. However, this gene module is not correated with the FEV1PRED, FVCPRED and PREDDLCO which are the predicted lung function values in percentage. This is consistent with the fact that the predicted lung function in percentage were calculated by removing effects from age, gender and race. 
+2. The WGCNA has identified many gene modules that are correlated with many important clinical traits for Sarcoidosis including the lung function and the CT scan variables.
+    + Turquoise module
+    + Brown module
+    + Brown4 module
+    + Grey60 module
+    + Violet module
+3. The identified gene modules above are in general also correlated with the cell differentials. This motivates us to apply WGCNA analysis to the data adjusted for the cell differentials.
+
