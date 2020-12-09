@@ -1,0 +1,139 @@
+---
+title: "Interferon Gamma Signaling in Sarcoidosis RNAseq Data"
+author: "Xiting Yan"
+date: "11/28/2020"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+
+library(captioner)
+library(circlize)
+library(clusterProfiler)
+library(corrplot)
+library(ComplexHeatmap)
+library(dplyr)
+library(EnsDb.Hsapiens.v86)
+library(gdata)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(gplots)
+library(grid)
+library(gridExtra)
+library(gridGraphics)
+library(kableExtra)
+library(knitr)
+library(Matrix)
+library(org.Hs.eg.db)
+library(parallel)
+library(reshape2)
+library(scales)
+library(Seurat)
+library(SingleR)
+library(tidyr)
+library(tidyverse)
+library(viridisLite)
+library(xlsx)
+library(randomcoloR)
+
+knit_hooks$set(webgl = hook_webgl)
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+home.dir<-"/home/yanxiting/driver_Grace"
+source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+```
+
+
+# Background
+
+In this note, we explore the expression profiles of genes related to interferon gamma signaling to understand the inflammation signals in the blood of sarcoidosis patients.
+
+We downloaded the Interferon Gamma Signaling network from Metacore and demonstrated the expression profiles of these genes in the Sarcoidosis patients.
+
+# IFNG signaling expression
+We load in the list of IFN-gamma signaling genes from metacore and demonstrated the expression profiles of these genes in the Sarcoidosis PBMC data.
+```{r fig.height=15,fig.width=10}
+# load in the IFN-gamma signaling gene
+data.filepath<-file.path(output.dir,"data","Interferon_gamma_signaling_metacore.xls")
+gene.list<-read.xls(data.filepath,check.names=F,skip=2,stringsAsFactors=F)
+gene.list<-gene.list[gene.list$'Gene Symbol'!="",]
+gene.list<-unique(gene.list$`Gene Symbol`) 
+length(gene.list)
+
+# load in the gene expression data
+# fpkm.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+
+# generate the heatmap for the genes in gene.list only
+data.matrix<-fpkm.matrix[fpkm.matrix.anno[,1]%in%gene.list,]
+data.matrix.anno<-fpkm.matrix.anno[fpkm.matrix.anno[,1]%in%gene.list,]
+rownames(data.matrix)<-data.matrix.anno[,1]
+
+unityNormalize <- function(x){
+     return((x-min(x))/(max(x)-min(x)))
+}
+
+my.data.norm<-t(apply(as.matrix(data.matrix), 1, unityNormalize))  
+
+colors.viridis.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(viridis(n=9),viridis(n=9)[9]), space = "RGB")
+colors.plasma.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(plasma(n=9),plasma(n=9)[9]), space = "RGB")
+colors.inferno.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(inferno(n=9), inferno(n=9)[9]), space="RGB")
+
+g<- grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    #cluster_columns=FALSE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    #top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = FALSE
+    )))
+
+output.filepath<-file.path(output.dir,"baseline","figures","heatmap_IFNGsignaling.pdf")
+ggsave(output.filepath,device="pdf",height=15,width=10,dpi=300,g)
+
+
+```
+
+
