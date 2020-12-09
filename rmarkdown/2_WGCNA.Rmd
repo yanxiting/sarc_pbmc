@@ -41,7 +41,8 @@ figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
 table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
 figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 
-home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
 source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 ```
@@ -52,8 +53,8 @@ output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_
 Load in and match the clinical data,fpkm matrix, and the sample mapping matrix.
 ```{r 0_CleanDataLoad.R,eval=FALSE,echo=TRUE,results='hide'}
 # /home/xy48/Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R
-home.dir<-"/home/yanxiting/driver_Grace"
-#home.dir<-"/home/xy48"
+#home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
 data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
 masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
@@ -87,12 +88,12 @@ Load in clinical matrix and extract data for the variables needed to correlate w
 ###################################################################
 #  Load in both the gene expression and the clinical data
 #  filter the genes based on given cv.threshold and match the gene expression data and the clinical data
-#home.dir<-"/home/xy48"
-home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
+#home.dir<-"/home/yanxiting/driver_Grace"
 cv.threshold<-0
 source(file.path(home.dir,"Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R"))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
-output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare",sep=""))
+output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare_V2",sep=""))
 
 if(file.exists(output.dir)==F){
 dir.create(output.dir)	
@@ -210,6 +211,10 @@ datTraits<-datTraits[c(
 "FVCPRED",
 "BDDLCO",
 "PREDDLCO",
+"ethor",
+"num_organ",
+"cd4",
+"d125",
 "MONOBALD",
 "EOSBALD",
 "LYMBALD",
@@ -357,6 +362,7 @@ We need to review the plots in sft_picking.pdf and generate a text file with eac
 ```{r 6_3_clustering.R,eval=FALSE,echo=TRUE,results='hide'}
 #---------------------------------------------------------------------------------------------------------------------------------------------------
 # /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/CV0_compare_V2")
 rdata.filepath<-file.path(output.dir,"sft_picking.RData")
 sftpower.filepath<-file.path(output.dir,"sft_power_list.txt")
 load(rdata.filepath)
@@ -506,8 +512,8 @@ dev.off()
 
 output.filepath<-file.path(output.dir,paste("heatmap_trait_correlation_modules_outliers_",i,"_pvaluesig.eps",sep=""))
 #pdf(file = output.filepath,width = 15,height = 9,paper="special")
-postscript(output.filepath,width=18,height=18,paper="special")
 #sizeGrWindow(15,9)
+postscript(output.filepath,width=10,height=10,paper="special")
 #pdf(file="Plots/moduleTraitRelationships.pdf", width=10, height=6);
 # Will display correlations and their p-values
 textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "");
@@ -683,7 +689,19 @@ temp.color.desig<-labels2colors(net$colors)
 cmd.out<-as.matrix(table(temp.color.desig))
 cat("module_names\tgene_num\n",file=output.filepath,append=F)
 write.table(cmd.out,file=output.filepath,append=T,sep="\t",col.names=F,row.names=T,quote=F)
+
 }
+
+
+
+
+
+
+
+
+
+
+
 
 # visualize and measure the similarity between different clustering results
 module.labels.list<-list()
