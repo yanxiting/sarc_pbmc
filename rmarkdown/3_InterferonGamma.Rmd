@@ -212,6 +212,55 @@ Heatmap(as.matrix(my.data.norm),
     )
 ```
 
+Here's a heatmap for all IFN-gamma signaling genes with annotation but clustered.
+
+```{r fig.height=15, fig.width=10}
+Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )
+g<-grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )))
+output.filepath<-file.path(output.dir,"baseline","figures","heatmap_IFNGsignaling_CD4&Phenogroup_clustered.pdf")
+ggsave(output.filepath,device="pdf",height=15,width=10,dpi=300,g)
+
+```
 
 Here's the heatmap for all IFN-gamma signaling genes without any annotation for the columns.
 ```{r fig.height=16,fig.width=10}
