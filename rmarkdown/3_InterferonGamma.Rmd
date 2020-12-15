@@ -213,3 +213,27 @@ Heatmap(as.matrix(my.data.norm),
 ```
 
 
+Here's the heatmap for all IFN-gamma signaling genes without any annotation for the columns.
+```{r fig.height=16,fig.width=10}
+Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    #top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )
+```
