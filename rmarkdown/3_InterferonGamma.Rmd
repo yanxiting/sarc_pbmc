@@ -49,7 +49,7 @@ library(viridisLite)
 library(xlsx)
 library(randomcoloR)
 
-knit_hooks$set(webgl = hook_webgl)
+#knit_hooks$set(webgl = hook_webgl)
 
 table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
 figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
@@ -80,6 +80,26 @@ We load in the list of IFN-gamma signaling genes from metacore and demonstrated 
 clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
 clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
 rownames(clinic.matrix)<-clinic.matrix[,1]
+
+# load in the CT scan data.
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,as.is=TRUE)
+rownames(ct.matrix)<-ct.matrix[,1]
+ct.matrix<-ct.matrix[clinic.matrix$GRADSID,]
+ct.matrix[,1]<-clinic.matrix$GRADSID
+rownames(ct.matrix)<-ct.matrix[,1]
+my.ct.matrix<-ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")]
+clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")])
+
+# generate the contingency table
+micronodule.vect<-as.logical(my.ct.matrix[,"Micronodule"]) | as.logical(my.ct.matrix[,"Micronodule_conglomerate"])
+temp1<-my.ct.matrix$Med_Lymphadenopathy
+temp2<-my.ct.matrix$Hilar_Lymphadenopathy
+temp1[!is.na(temp1) & temp1!=0]<-1
+temp2[!is.na(temp2) & temp2!=0]<-1
+lympha.vect<-as.logical(temp1) | as.logical(temp2)
+
+table(micronodule.vect,lympha.vect)
 
 # load in the IFN-gamma signaling gene
 data.filepath<-file.path(output.dir,"data","Interferon_gamma_signaling_metacore.xls")
