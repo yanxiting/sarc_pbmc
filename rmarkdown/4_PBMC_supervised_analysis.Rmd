@@ -246,13 +246,13 @@ my.con.cor(fpkm.matrix.clean,feature.name="PREDDLCO",method.name="spearman",tiss
 my.con.cor(fpkm.matrix.clean,feature.name="FEV1FVCratio",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
 
 
-# for scadding treated as a continuous variable
+# for scadding treated as a continuous variable, potentially more reasonable than DEGs
 #output.dir<-"~/driver_Naftali/GRADS/SARC_results/Results_summary/Disease_correlated_genes"
 output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Disease_correlated_genes"
 if(file.exists(output.dir)==F){
   dir.create(output.dir)
 }
-my.con.cor(fpkm.matrix.clean,feature.name="SCADDING",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="SCADDING",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir) 
 
 
 output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/CellDifferentials_correlated_genes"

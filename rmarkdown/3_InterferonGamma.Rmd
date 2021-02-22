@@ -101,6 +101,8 @@ lympha.vect<-as.logical(temp1) | as.logical(temp2)
 
 table(micronodule.vect,lympha.vect)
 
+# CT may be more accurate than SCADDING
+
 # load in the IFN-gamma signaling gene
 data.filepath<-file.path(output.dir,"data","Interferon_gamma_signaling_metacore.xls")
 gene.list<-read.xls(data.filepath,check.names=F,skip=2,stringsAsFactors=F)
