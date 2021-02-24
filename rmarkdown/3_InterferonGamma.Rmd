@@ -73,8 +73,10 @@ In this note, we explore the expression profiles of genes related to interferon 
 
 We downloaded the Interferon Gamma Signaling network from Metacore and demonstrated the expression profiles of these genes in the Sarcoidosis patients.
 
-# IFNG signaling expression
+# heatmap of IFNG signaling genes
+
 We load in the list of IFN-gamma signaling genes from metacore and demonstrated the expression profiles of these genes in the Sarcoidosis PBMC data.
+
 ```{r fig.height=16,fig.width=10}
 # load in the clinical data
 clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
@@ -99,9 +101,21 @@ temp1[!is.na(temp1) & temp1!=0]<-1
 temp2[!is.na(temp2) & temp2!=0]<-1
 lympha.vect<-as.logical(temp1) | as.logical(temp2)
 
+cat("Here's a contingency table showing the overlap between presence of micronodule and lymphadenopathy:\n")
 table(micronodule.vect,lympha.vect)
+cat("\nHere's the breakdown of patients with no micronodule and no lymphadenopathy across the different SCADDING stage:\n")
+table(clinic.matrix$SCADDING[(!micronodule.vect) & (!lympha.vect)])
+cat("\n")
 
-# CT may be more accurate than SCADDING
+# define a new phenotype "nodule_lymph_pheno" based on these four groups
+my.pheno<-rep("",nrow(clinic.matrix))
+my.pheno[(!micronodule.vect) & (!lympha.vect)]<-"none"
+my.pheno[micronodule.vect & (!lympha.vect)]<-"micronodule"
+my.pheno[(!micronodule.vect) & lympha.vect]<-"lymph"
+my.pheno[micronodule.vect & lympha.vect]<-"both"
+my.pheno[my.pheno==""]<-NA
+clinic.matrix<-cbind(clinic.matrix,my.pheno)
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"nodule_lymph_pheno"
 
 # load in the IFN-gamma signaling gene
 data.filepath<-file.path(output.dir,"data","Interferon_gamma_signaling_metacore.xls")
@@ -132,8 +146,16 @@ unityNormalize <- function(x){
 my.data.norm<-t(apply(as.matrix(data.matrix), 1, unityNormalize))  
 my.clinic.matrix<-clinic.matrix[colnames(my.data.norm),]
 my.clinic.matrix[my.clinic.matrix[,"cd4"]<0,"cd4"]<-NA
+
+# dichotomize CD4 level
+temp.vect<-my.clinic.matrix$cd4
+temp.vect[my.clinic.matrix$cd4<400]<-"low"
+temp.vect[my.clinic.matrix$cd4>=400]<-"high"
+my.clinic.matrix<-cbind(my.clinic.matrix,temp.vect)
+colnames(my.clinic.matrix)[ncol(my.clinic.matrix)]<-"cd4_bin"
+
 # sort the cells for cell types, disease and subjects
-temp.meta.data<-data.frame(cellBarcode=1:ncol(my.data.norm),phenogroup=my.clinic.matrix[,"PHENGRP"],cd4=my.clinic.matrix[,"cd4"],subject.names=my.clinic.matrix[,1],stringsAsFactors=F)
+temp.meta.data<-data.frame(cellBarcode=1:ncol(my.data.norm),phenogroup=my.clinic.matrix[,"PHENGRP"],cd4=my.clinic.matrix[,"cd4"],cd4bin=my.clinic.matrix[,"cd4_bin"],nodulelymph=my.clinic.matrix[,"nodule_lymph_pheno"],subject.names=my.clinic.matrix[,1],stringsAsFactors=F)
 
 column_order <- temp.meta.data %>% 
     arrange(phenogroup, cd4) %>%
@@ -146,6 +168,14 @@ phenogroup_order<-temp.meta.data %>%
 cd4_order <- temp.meta.data %>% 
     arrange(phenogroup, cd4) %>%
     pull(cd4)
+
+cd4bin_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cd4bin)
+
+nodlymph_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(nodulelymph)
     
 subject_order <- temp.meta.data %>% 
     arrange(phenogroup, cd4) %>%
@@ -159,26 +189,37 @@ my.colors<-randomColor(count = length(unique(my.clinic.matrix[,"PHENGRP"])),hue=
 #my.colors<-distinctColorPalette(k=length(unique(my.clinic.matrix[,"PHENGRP"])),altCol=FALSE,runTsne=TRUE)
 df.color<-list()
 
-# colors for cell types
+# colors for phenotypic groups
 temp.vect<-my.colors
 names(temp.vect)<-unique(my.clinic.matrix$PHENGRP)
 df.color[[1]]<-temp.vect
 
-# color for disease
+# color for cd4
 #df.color[[2]]<-c("control"="lightgreen","asthma"="salmon")
 df.color[[2]]<-colorRamp2(c(0, 1000, 2000), c("blue", "white", "red"))
 
-  
+# color for cd4_binary
+temp.vect<-c("purple","yellow")
+names(temp.vect)<-c("low","high")
+df.color[[3]]<-temp.vect
+
+
+# color for nodule_lympha_pheno
+
+temp.vect<-c("white","lightpink","red","brown")
+names(temp.vect)<-c("none","lymph","micronodule","both")
+df.color[[4]]<-temp.vect
+
 # color for subject
 temp.vect<-randomColor(length(unique(my.clinic.matrix[,1])))
 names(temp.vect)<-unique(as.character(subject_order))
-df.color[[3]]<-temp.vect
+df.color[[5]]<-temp.vect
 
-names(df.color)<-c("phenogroup","cd4","subject")
+names(df.color)<-c("phenogroup","cd4","cd4_binary","nodule_lymph_pheno","subject")
 
 # create the heatmap annotation
 #col.annotation<-HeatmapAnnotation(celltype=celltype_order,disease=disease_order,subject=subject_order,col=df.color,show_legend=FALSE,annotation_height=unit(7,"cm"))
-col.annotation<-HeatmapAnnotation(phenogroup=phenogroup_order,cd4=cd4_order,show_legend=TRUE,annotation_height=unit(7,"cm"))
+col.annotation<-HeatmapAnnotation(df=data.frame(phenogroup=phenogroup_order,cd4=cd4_order,cd4_binary=cd4bin_order,nodule_lymph_pheno=nodlymph_order),col=df.color[1:4],show_legend=TRUE,annotation_height=unit(7,"cm"))
 
 
 colors.viridis.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(viridis(n=9),viridis(n=9)[9]), space = "RGB")

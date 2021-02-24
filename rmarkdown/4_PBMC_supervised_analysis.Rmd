@@ -52,6 +52,7 @@ To identify gene signatures associated with clinical traits in a supervised way,
 
 ## original data
 
+### Data Loading
 First, we load in the fpkm and the clinical data.
 ```{r}
 
@@ -130,6 +131,7 @@ cat("The dimension of the clinical data is\n",paste(dim(my.clinic.matrix),collap
 
 Second, we conduct the supervised analysis to identify genes associated with the given traits extracted above.
 
+### Continuous traits
 * Function to do the test for continuous tratis.
 ```{r}
 #########
@@ -271,6 +273,7 @@ my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_lymph",method.nam
 
 ```
 
+### Categorical traits
 * Function to do the test for categorical traits.
 ```{r}
 my.cat.cor<-function(fpkm.matrix.clean,feature.name="GENDER",method.name="wilcox",tissue.name="BAL",clinic.matrix,outputdir){
@@ -500,6 +503,7 @@ my.cat.cor(fpkm.matrix.clean,feature.name="SCADDING",tissue.name="PBMC",clinic.m
 #my.cat.cor(fpkm.matrix.clean,feature.name="restrictiveBinary",tissue.name="BAL",samplelist=sample.list.all,clinicmatrix=clinic.matrix,outputdir=output.dir)
 ```
 
+### CT scan reads
 * Identify genes associated with CT scan reads.
 ```{r}
 ################################
@@ -631,6 +635,261 @@ cat("\n",sep="")
 my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Micronodule",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
 ```
 
+### Recoded Micronodule and Lymphadenopathy
+We recode the micronodule and lymphadenopathy to get a redefined and likely more accurate phenotype definition. 
+
+#### DEGs
+We consider this phenotype as a categorical variable and identify differentially expressed genes between these four groups using the none group as baseline group.
+
+* First, define the function to do the test.
+```{r}
+my.cat.cor<-function(fpkm.matrix.clean,feature.name="GENDER",method.name="wilcox",tissue.name="BAL",clinic.matrix,outputdir){
+
+# extract the fpkm matrix for the given tissue
+temp.names<-intersect(colnames(fpkm.matrix.clean),rownames(clinic.matrix))
+data.matrix<-fpkm.matrix.clean[,temp.names]
+clinic.matrix<-clinic.matrix[temp.names,]
+bal.fpkm<-data.matrix
+
+# generate the clinical matrix
+my.clinic.matrix<-clinic.matrix[colnames(data.matrix),]	
+
+clinic.vect<-as.numeric(as.factor(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name]))
+if(length(table(clinic.vect))!=2){
+cat("ERROR: the phenotype does not have two levels!\n")
+return(1)
+}
+
+cat(feature.name,": baseline=",sort(unique(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name]),decreasing = F)[1],"\n",sep="")
+
+# generate the correlation results
+x1<-bal.fpkm[,!is.na(clinic.vect) & clinic.vect==as.numeric(names(table(clinic.vect))[1])]
+x2<-bal.fpkm[,!is.na(clinic.vect) & clinic.vect==as.numeric(names(table(clinic.vect))[2])]
+
+#age.pvalue<-apply(bal.fpkm,1,my.cor.test,y=clinic.vect,method.name=method.name)
+age.pvalue.direct<-apply(cbind(x1,x2),1,my.wilcox,n=ncol(x1))
+age.pvalue<-abs(age.pvalue.direct)
+
+#age.pvalue<-matrix(unlist(age.pvalue),ncol=2,byrow=T)
+age.pvalue<-cbind(age.pvalue,rep(NA,length(age.pvalue)))
+colnames(age.pvalue)<-c("pvalue","corr_coef")
+age.fdr<-p.adjust(age.pvalue[,"pvalue"],method="fdr")
+age.pvalue<-cbind(age.pvalue,age.fdr)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fdr"
+rownames(age.pvalue)<-rownames(bal.fpkm)
+temp.fold<-apply(x1,1,mean,na.rm=T)/apply(x2,1,mean,na.rm=T)
+age.pvalue<-cbind(age.pvalue,temp.fold)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fold_change"
+
+age.pvalue<-cbind(age.pvalue,age.pvalue.direct)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"pval_dir"
+
+
+fpkm.info<-apply(bal.fpkm>0,1,sum)
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>0.1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,median))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,mean))
+colnames(fpkm.info)<-c("fpkm>0_num","fpkm>0.1_num","fpkm>1_num","fpkm_median","fpkm_mean")
+
+
+if(file.exists(outputdir)==F){
+cat("WARNING: output.dir doesn't exists!\n")
+return(1)
+}
+
+cmd.out<-cbind(age.pvalue,fpkm.info)
+output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_allgenes_",tissue.name,".txt",sep=""))
+cat("gene_names\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+
+if(sum(!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05)==0){
+  # When there's nothing that pass the FDR threshold, we use the threshold of p value<0.05 & fold change >2
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+
+  cmd.out<-cbind(age.pvalue,fpkm.info)
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,".txt",sep=""))
+  cat("gene_names\t",file=output.filepath,append=F)
+  write.table(cmd.out[sig.genes,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_both_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_positive_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-sig.genes[age.pvalue[sig.genes,"pval_dir"]>0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_negative_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-sig.genes[age.pvalue[sig.genes,"pval_dir"]<0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)  
+  
+}else{
+  # if there are anything significant with FDR<0.05
+  cmd.out<-cbind(age.pvalue,fpkm.info)
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,".txt",sep=""))
+  cat("gene_names\t",file=output.filepath,append=F)
+  write.table(cmd.out[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_both_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_positive_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05 & age.pvalue[,"pval_dir"]>0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_negative_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05 & age.pvalue[,"pval_dir"]<0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+}
+return(0)
+}
+```
+
+* Second, load in the data.
+```{r}
+
+# load in the clinical data
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-clinic.matrix[,1]
+
+# load in the CT scan data.
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,as.is=TRUE)
+rownames(ct.matrix)<-ct.matrix[,1]
+ct.matrix<-ct.matrix[clinic.matrix$GRADSID,]
+ct.matrix[,1]<-clinic.matrix$GRADSID
+rownames(ct.matrix)<-ct.matrix[,1]
+my.ct.matrix<-ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")]
+clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")],stringsAsFactors=F)
+
+# generate the contingency table
+micronodule.vect<-as.logical(my.ct.matrix[,"Micronodule"]) | as.logical(my.ct.matrix[,"Micronodule_conglomerate"])
+temp1<-my.ct.matrix$Med_Lymphadenopathy
+temp2<-my.ct.matrix$Hilar_Lymphadenopathy
+temp1[!is.na(temp1) & temp1!=0]<-1
+temp2[!is.na(temp2) & temp2!=0]<-1
+lympha.vect<-as.logical(temp1) | as.logical(temp2)
+
+cat("Here's a contingency table showing the overlap between presence of micronodule and lymphadenopathy:\n")
+table(micronodule.vect,lympha.vect)
+cat("\nHere's the breakdown of patients with no micronodule and no lymphadenopathy across the different SCADDING stage:\n")
+table(clinic.matrix$SCADDING[(!micronodule.vect) & (!lympha.vect)])
+cat("\n")
+
+# define a new phenotype "nodule_lymph_pheno" based on these four groups
+my.pheno<-rep("",nrow(clinic.matrix))
+my.pheno[(!micronodule.vect) & (!lympha.vect)]<-"none"
+my.pheno[micronodule.vect & (!lympha.vect)]<-"micronodule"
+my.pheno[(!micronodule.vect) & lympha.vect]<-"lymph"
+my.pheno[micronodule.vect & lympha.vect]<-"both"
+my.pheno[my.pheno==""]<-NA
+clinic.matrix<-cbind(clinic.matrix,my.pheno,stringsAsFactors=F)
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"nodule_lymph_pheno"
+
+
+# load in the gene expression data
+# fpkm.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+rownames(fpkm.matrix)<-paste(fpkm.matrix.anno[,"Gene_Id"],"_",fpkm.matrix.anno[,"Chr"],sep="")
+
+```
+
+
+* Apply the function to binary traits.
+```{r}
+#output.dir<-"/home/fas/kaminski/am2952/scratch/SARC209clean/Results_summary/Demographics_correlated_genes"
+
+##Female n=112 Male n=97 Female=0 Male=1 Female is the first group so the positive and negative correlated are for F
+##White n=153 Black n=49 White=1 Black=2 White is the first group so the positive and negative correlated are for W
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Supervised_Analysis/NoduleLymphaPheno_DEGs"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+# compare lymphadenopathy only to micronodule only
+output.subdir<-file.path(output.dir,"lymph_micronodule_compare")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+fpkm.matrix.clean<-cbind(fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="lymph"],fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="micronodule"])
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+temp<-my.cat.cor(fpkm.matrix.clean,feature.name="nodule_lymph_pheno",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+output.filepath<-file.path(output.subdir,"readme.txt")
+cat(temp,file=output.filepath,append=F)
+
+# compare lymphadenopathy only to both
+output.subdir<-file.path(output.dir,"both_lymph_compare")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+fpkm.matrix.clean<-cbind(fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="lymph"],fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="both"])
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+temp<-my.cat.cor(fpkm.matrix.clean,feature.name="nodule_lymph_pheno",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+output.filepath<-file.path(output.subdir,"readme.txt")
+cat(temp,file=output.filepath,append=F)
+
+# compare micronodule only to both
+output.subdir<-file.path(output.dir,"both_micronodule_compare")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+fpkm.matrix.clean<-cbind(fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="micronodule"],fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="both"])
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+temp<-my.cat.cor(fpkm.matrix.clean,feature.name="nodule_lymph_pheno",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+output.filepath<-file.path(output.subdir,"readme.txt")
+cat(temp,file=output.filepath,append=F)
+
+
+```
+
+
+### Overlap between different traits
 * We show the number of genes significantly (FDR<0.05) associated with the different clinical traits.
 ```{r eval=TRUE, echo=FALSE, cache=TRUE,warning=FALSE,message=FALSE,results='asis'}
 data.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
