@@ -41,17 +41,23 @@ figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
 table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
 figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 
-#home.dir<-"/home/yanxiting/driver_Grace"
-home.dir<-"/home/xy48"
+home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/xy48"
 source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline")
 ```
 
-In this note, we adjust the gene expression to remove the effect of cell differentials first. Then we apply WGCNA onto the adjusted data to identify gene modules.
+In this note, we adjust the gene expression to remove the effect of cell differentials first. Then we apply WGCNA onto the adjusted data to identify gene modules. 
+
+We ran this notes on the workstation with files read from the mounted grace hpc scratch folders.
 
 # Data adjustment for cell differentials
 We remove the effect of cell differentials using a linear regression model. 
-```{r}
+```{r eval=FALSE}
+######################################################
+# This code chunk only needs to be run once.
+######################################################
+
 #home.dir<-"/home/xy48"
 data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
@@ -114,12 +120,13 @@ write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names
 Load in and match the clinical data,fpkm matrix, and the sample mapping matrix.
 ```{r 0_CleanDataLoad.R,eval=FALSE,echo=TRUE,results='hide'}
 # These codes should be saved in /home/xy48/Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R
-#home.dir<-"/home/yanxiting/driver_Grace"
-home.dir<-"/home/xy48"
+home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/xy48"
 data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 #fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
 fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
 masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+
 
 # load in the list of GRADS IDs and KIT IDs from the master key file
 mkey<-read.xls(masterkey.filepath,sheet=3,skip=2,header=T,check.names=F,stringsAsFactors = F)
@@ -150,10 +157,10 @@ Load in clinical matrix and extract data for the variables needed to correlate w
 ###################################################################
 #  Load in both the gene expression and the clinical data
 #  filter the genes based on given cv.threshold and match the gene expression data and the clinical data
-home.dir<-"/home/xy48"
-#home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/xy48"
+home.dir<-"/home/yanxiting/driver_Grace"
 cv.threshold<-0
-source(file.path(home.dir,"Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R"))
+#source(file.path(home.dir,"Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R"))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_celladjusted")
 output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare",sep=""))
 
@@ -168,9 +175,33 @@ dir.create(output.dir)
 #
 #=====================================================================================
 #clinic.filepath<-file.path(home.dir,"/home/yanxiting/Research/GRADS_SARC/Data/SARC_combine_clinical_data20170814.txt"
-clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+
+# the old.clinic.filepath had SCADDING and more features required for the WGCNA
+# the clinic.filepath had updated features. So we load in both and merge them.
+old.clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clin_data_visit1_XY.csv")
+
+
+old.clinic.matrix=read.csv(old.clinic.filepath,check.names=F,stringsAsFactors=F)
 clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
-rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+
+common.features<-intersect(colnames(old.clinic.matrix),colnames(clinic.matrix))
+my.data<-clinic.matrix[,common.features]
+
+old.features<-setdiff(colnames(old.clinic.matrix),colnames(clinic.matrix))
+temp<-old.clinic.matrix[,old.features]
+rownames(temp)<-old.clinic.matrix[,1]
+temp<-temp[my.data[,1],]
+my.data<-cbind(my.data,temp)
+
+new.features<-setdiff(colnames(clinic.matrix),colnames(old.clinic.matrix))
+temp<-clinic.matrix[,new.features]
+rownames(temp)<-clinic.matrix[,1]
+temp<-temp[my.data[,1],]
+my.data<-cbind(my.data,temp)
+
+clinic.matrix<-my.data
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,"GRADSID"] # GRADS ID
 clinic.matrix<-clinic.matrix[sample.matrix[,1],]
 
 ##########for BAL samples
@@ -196,7 +227,8 @@ collectGarbage()
 datExpr<-t(my.data.matrix)
 
 # remove certain columns in the clinical data
-datTraits<-bal.clinic.matrix[,-c(1,6,8:41)]
+#datTraits<-bal.clinic.matrix[,-c(1,6,8:41)]
+datTraits<-bal.clinic.matrix[,-1]
 
 # change PHENGRP and SCADDING into numbers
 temp.vect<-datTraits[,"SCADDING"]
@@ -255,6 +287,15 @@ datTraits<-datTraits[c(
 "FVCPRED",
 "BDDLCO",
 "PREDDLCO",
+"ethor",
+"cd4",
+"cal",
+"d25",
+"d125",
+"smoke",
+"pk_yr",
+"steroid_atv1",
+"dmard_atv1",
 "MONOBALD",
 "EOSBALD",
 "LYMBALD",
@@ -277,11 +318,11 @@ Generate the hierarhical clustering tree using the genes to identify potential o
 ```{r 6_1_sampletree.R,eval=FALSE,echo=TRUE,results='hide'}
 #----------------------------------------------------------------------------------------------------------------------------------------------------
 # /Rprogram/GRADS_PBMC/WGCNA/6_1_sampletree.R
-rdata.filepath<-file.path(output.dir,"input_data.RData")
+#rdata.filepath<-file.path(output.dir,"input_data.RData")
 library(WGCNA)
 
 #rdata.filepath<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary/WGCNA_BAL/PHGRP_filtering/CV0.4526_compare/input_data.RData"
-load(rdata.filepath)
+#load(rdata.filepath)
 sampleTree = hclust(dist(datExpr), method = "average");
 
 # save the hierarchical tree before removing the outliers
@@ -314,10 +355,10 @@ We need to generate the hclust_cut_heights.list.txt to provide the heights at wh
 #rdata.filepath<-""
 #cutheight.filepath<-""
 #output.dir<-""
-rdata.filepath<-file.path(output.dir,"input_data.RData")
+#rdata.filepath<-file.path(output.dir,"input_data.RData")
 cutheight.filepath<-file.path(output.dir,"hclust_cut_heights_list.txt")
 library(WGCNA)
-load(rdata.filepath)
+#load(rdata.filepath)
 enableWGCNAThreads(nThreads = 15)
 # load in the height vector
 #height.vect<-c(50000,48000,38080,37970,33640,25100,23700,19260,18260)
@@ -404,12 +445,11 @@ We need to review the plots in sft_picking.pdf and generate a text file with eac
 ```{r 6_3_clustering.R,eval=FALSE,echo=TRUE,results='hide'}
 #---------------------------------------------------------------------------------------------------------------------------------------------------
 # /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R
-output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/CV0_compare_V2")
-rdata.filepath<-file.path(output.dir,"sft_picking.RData")
+#output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_celladjusted/CV0_compare")
+
+#rdata.filepath<-file.path(output.dir,"sft_picking.RData")
 sftpower.filepath<-file.path(output.dir,"sft_power_list.txt")
-load(rdata.filepath)
-#output.dir<-""
-#sftpower.filepath<-""
+#load(rdata.filepath)
 
 library(WGCNA)
 enableWGCNAThreads(nThreads = 15)
@@ -765,7 +805,7 @@ my.module.colors.list[[i]]<-module.colors.list[[i]][net.list[[1]]$goodGenes]
 
 geneTree = net.list[[1]]$dendrograms[[1]]
 output.filepath<-file.path(output.dir,"dendrogram_outliers_compare.eps")
-postscript(output.filepath,width=12,height=24,paper="special")
+postscript(output.filepath,width=14,height=6,paper="special")
 #postscript(output.filepath)
 plotDendroAndColors(geneTree,
 				matrix(unlist(my.module.colors.list),nrow=length(my.module.colors.list[[1]]),byrow=F),
@@ -778,7 +818,7 @@ dev.off()
 save.image(file.path(output.dir,"wgcna_cutheights.RData"))
 ```
 
-## Parallele Scripts Generation
+## Parallele Scripts Generation (not run)
 Here're the R codes that generate the scripts to run all the above steps.
 ```{r 6_WGCNA_new.R,eval=FALSE,echo=TRUE,results='hide'}
 #---------------------------------------------------------------------------------------------------------------------------------------------------
