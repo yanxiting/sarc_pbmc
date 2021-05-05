@@ -95,10 +95,16 @@ cell.data<-cell.data[apply(is.na(cell.data),1,sum)==0,]
 #temp.matrix<-matrix(rep(temp.matrix,ncol(cell.data)),nrow=nrow(cell.data),byrow=F)
 #cell.data<-cell.data*100/temp.matrix
 
+# get rid of the neutrophil and adjust the other cell differentials to sum up to 100%
+cell.data.orig<-cell.data
+cell.data<-cell.data[,colnames(cell.data)!="p_neut"]
+temp.matrix<-matrix(rep(apply(cell.data,1,sum),ncol(cell.data)),nrow=nrow(cell.data),byrow=F)
+cell.data<-cell.data*80/temp.matrix
+
 # adjust the data
 res.matrix<-numeric()
 for(i in 1:nrow(my.data.matrix)){
-  temp.data<-data.frame(gexp=t(my.data.matrix[i,]),mono=cell.data[,1],eos=cell.data[,2],lym=cell.data[,3],neut=cell.data[,4])
+  temp.data<-data.frame(gexp=t(my.data.matrix[i,]),mono=cell.data[,1],eos=cell.data[,2],lym=cell.data[,3])
   colnames(temp.data)[1]<-"gexp"
   my.res<-lm(gexp~.,data=temp.data)$residuals
   res.matrix<-rbind(res.matrix,my.res)
@@ -107,7 +113,11 @@ rownames(res.matrix)<-rownames(my.data.matrix)
 colnames(res.matrix)<-colnames(my.data.matrix)
 cmd.out<-cbind(anno.matrix[rownames(res.matrix),],res.matrix)
 
-output.filepath<-file.path(output.dir,"data","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+output.subdir<-file.path(output.dir,"data_adjusted2")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+output.filepath<-file.path(output.subdir,"TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 ```
 
@@ -124,7 +134,8 @@ home.dir<-"/home/yanxiting/driver_Grace"
 #home.dir<-"/home/xy48"
 data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 #fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
-fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+#fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
 masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
 
 
@@ -161,7 +172,12 @@ Load in clinical matrix and extract data for the variables needed to correlate w
 home.dir<-"/home/yanxiting/driver_Grace"
 cv.threshold<-0
 #source(file.path(home.dir,"Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R"))
-output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_celladjusted")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_celladjusted2")
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)	
+}
+
 output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare",sep=""))
 
 if(file.exists(output.dir)==F){
