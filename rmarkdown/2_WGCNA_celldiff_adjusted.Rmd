@@ -792,15 +792,6 @@ write.table(cmd.out,file=output.filepath,append=T,sep="\t",col.names=F,row.names
 
 
 
-
-
-
-
-
-
-
-
-
 # visualize and measure the similarity between different clustering results
 module.labels.list<-list()
 module.colors.list<-list()
