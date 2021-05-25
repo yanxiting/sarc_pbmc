@@ -1,5 +1,5 @@
 ---
-title: "Interferon Gamma Signaling in Sarcoidosis RNAseq Data"
+title: "Sarcoidosis RNAseq Data Differences across Phenotypic Groups"
 author: "Xiting Yan"
 date: "11/28/2020"
 output:
@@ -69,9 +69,11 @@ output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_
 
 # Background
 
-In this note, we explore the expression profiles of genes related to interferon gamma signaling to understand the inflammation signals in the blood of sarcoidosis patients.
+In this note, we explore the differences in expression profiles of genes across different phenotypic groups predefined to show that there's no significant differences. We use both interferon gamma signaling related genes and variable genes to show this.
 
-We downloaded the Interferon Gamma Signaling network from Metacore and demonstrated the expression profiles of these genes in the Sarcoidosis patients.
+* The Interferon Gamma Signaling network was downloaded from Metacore and demonstrated the expression profiles of these genes in the Sarcoidosis patients.
+
+* We extract genes with high coefficient of variations from the data as variable genes.
 
 # heatmap of IFNG signaling genes
 
@@ -348,4 +350,272 @@ Heatmap(as.matrix(my.data.norm),
     heatmap_legend_param=list(title = "Expression"),
     show_heatmap_legend = TRUE
     )
+```
+
+
+# heatmap of variable genes
+
+First, we load in the data and calculate the coefficient of variation of all genes to define variable genes.
+```{r fig.height=16,fig.width=10}
+# load in the clinical data
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-clinic.matrix[,1]
+
+# load in the CT scan data.
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,as.is=TRUE)
+rownames(ct.matrix)<-ct.matrix[,1]
+ct.matrix<-ct.matrix[clinic.matrix$GRADSID,]
+ct.matrix[,1]<-clinic.matrix$GRADSID
+rownames(ct.matrix)<-ct.matrix[,1]
+my.ct.matrix<-ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")]
+clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")])
+
+# generate the contingency table
+micronodule.vect<-as.logical(my.ct.matrix[,"Micronodule"]) | as.logical(my.ct.matrix[,"Micronodule_conglomerate"])
+temp1<-my.ct.matrix$Med_Lymphadenopathy
+temp2<-my.ct.matrix$Hilar_Lymphadenopathy
+temp1[!is.na(temp1) & temp1!=0]<-1
+temp2[!is.na(temp2) & temp2!=0]<-1
+lympha.vect<-as.logical(temp1) | as.logical(temp2)
+
+cat("Here's a contingency table showing the overlap between presence of micronodule and lymphadenopathy:\n")
+table(micronodule.vect,lympha.vect)
+cat("\nHere's the breakdown of patients with no micronodule and no lymphadenopathy across the different SCADDING stage:\n")
+table(clinic.matrix$SCADDING[(!micronodule.vect) & (!lympha.vect)])
+cat("\n")
+
+# define a new phenotype "nodule_lymph_pheno" based on these four groups
+my.pheno<-rep("",nrow(clinic.matrix))
+my.pheno[(!micronodule.vect) & (!lympha.vect)]<-"none"
+my.pheno[micronodule.vect & (!lympha.vect)]<-"micronodule"
+my.pheno[(!micronodule.vect) & lympha.vect]<-"lymph"
+my.pheno[micronodule.vect & lympha.vect]<-"both"
+my.pheno[my.pheno==""]<-NA
+clinic.matrix<-cbind(clinic.matrix,my.pheno)
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"nodule_lymph_pheno"
+
+# load in the gene expression data
+# fpkm.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+rownames(fpkm.matrix)<-paste(fpkm.matrix.anno[,"Gene_Id"],"_",fpkm.matrix.anno[,"Chr"],sep="")
+
+# remove genes with mean=0 and SD=0 so that CV can be accurate
+mean.vect<-apply(fpkm.matrix,1,mean)
+sd.vect<-apply(fpkm.matrix,1,sd)
+
+fpkm.matrix.filtered<-fpkm.matrix[mean.vect!=0 & sd.vect!=0,]
+fpkm.matrix.anno.filtered<-fpkm.matrix.anno[mean.vect!=0 & sd.vect!=0,]
+mean.vect.filtered<-mean.vect[mean.vect!=0 & sd.vect!=0]
+sd.vect.filtered<-sd.vect[mean.vect!=0 & sd.vect!=0]
+cv.vect.filtered<-sd.vect.filtered/mean.vect.filtered
+
+# output the CV and its quantile into one file
+cmd.out<-cbind(seq(from=0,to=1,by=0.01),quantile(cv.vect.filtered,prob=seq(from=0,to=1,by=0.01)))
+colnames(cmd.out)<-c("percentage","quantile")
+output.filepath<-file.path(output.dir,"cv_allgenes_TPM.xlsx")
+write.xlsx(cmd.out,file=output.filepath,sheetName="CV_quantiles",col.names=T,row.names=F,append=F)
+cmd.out<-cbind(rownames(fpkm.matrix.filtered),cv.vect.filtered)
+colnames(cmd.out)<-c("gene_names","CV")
+write.xlsx(cmd.out,file=output.filepath,append=T,sheetName="CV",col.names=T,row.names=F)  
+  
+var.genes<-rownames(fpkm.matrix.filtered)[cv.vect.filtered>0.6]
+cat("We chose ",length(var.genes)," variable genes (CV>0.6).\n",sep="")
+
+# generate the heatmap for the genes in gene.list only
+data.matrix<-fpkm.matrix.filtered[var.genes,]
+data.matrix.anno<-fpkm.matrix.anno.filtered[rownames(fpkm.matrix.filtered)%in%var.genes,]
+#rownames(data.matrix)<-data.matrix.anno[,1]
+
+unityNormalize <- function(x){
+     return((x-min(x))/(max(x)-min(x)))
+}
+
+my.data.norm<-t(apply(as.matrix(data.matrix), 1, unityNormalize))  
+my.clinic.matrix<-clinic.matrix[colnames(my.data.norm),]
+my.clinic.matrix[my.clinic.matrix[,"cd4"]<0,"cd4"]<-NA
+
+# dichotomize CD4 level
+temp.vect<-my.clinic.matrix$cd4
+temp.vect[my.clinic.matrix$cd4<400]<-"low"
+temp.vect[my.clinic.matrix$cd4>=400]<-"high"
+my.clinic.matrix<-cbind(my.clinic.matrix,temp.vect)
+colnames(my.clinic.matrix)[ncol(my.clinic.matrix)]<-"cd4_bin"
+
+# sort the cells for cell types, disease and subjects
+temp.meta.data<-data.frame(cellBarcode=1:ncol(my.data.norm),phenogroup=my.clinic.matrix[,"PHENGRP"],cd4=my.clinic.matrix[,"cd4"],cd4bin=my.clinic.matrix[,"cd4_bin"],nodulelymph=my.clinic.matrix[,"nodule_lymph_pheno"],subject.names=my.clinic.matrix[,1],stringsAsFactors=F)
+
+column_order <- temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cellBarcode)
+
+phenogroup_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(phenogroup)
+
+cd4_order <- temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cd4)
+
+cd4bin_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cd4bin)
+
+nodlymph_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(nodulelymph)
+    
+subject_order <- temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(subject.names)
+
+my.data<-my.data.norm[,column_order]
+
+######
+# define the color
+my.colors<-randomColor(count = length(unique(my.clinic.matrix[,"PHENGRP"])),hue="random",luminosity="dark")
+#my.colors<-distinctColorPalette(k=length(unique(my.clinic.matrix[,"PHENGRP"])),altCol=FALSE,runTsne=TRUE)
+df.color<-list()
+
+# colors for phenotypic groups
+temp.vect<-my.colors
+names(temp.vect)<-unique(my.clinic.matrix$PHENGRP)
+df.color[[1]]<-temp.vect
+
+# color for cd4
+#df.color[[2]]<-c("control"="lightgreen","asthma"="salmon")
+df.color[[2]]<-colorRamp2(c(0, 1000, 2000), c("blue", "white", "red"))
+
+# color for cd4_binary
+temp.vect<-c("purple","yellow")
+names(temp.vect)<-c("low","high")
+df.color[[3]]<-temp.vect
+
+
+# color for nodule_lympha_pheno
+
+temp.vect<-c("white","lightpink","red","brown")
+names(temp.vect)<-c("none","lymph","micronodule","both")
+df.color[[4]]<-temp.vect
+
+# color for subject
+temp.vect<-randomColor(length(unique(my.clinic.matrix[,1])))
+names(temp.vect)<-unique(as.character(subject_order))
+df.color[[5]]<-temp.vect
+
+names(df.color)<-c("phenogroup","cd4","cd4_binary","nodule_lymph_pheno","subject")
+
+# create the heatmap annotation
+#col.annotation<-HeatmapAnnotation(celltype=celltype_order,disease=disease_order,subject=subject_order,col=df.color,show_legend=FALSE,annotation_height=unit(7,"cm"))
+col.annotation<-HeatmapAnnotation(df=data.frame(phenogroup=phenogroup_order,cd4=cd4_order,cd4_binary=cd4bin_order,nodule_lymph_pheno=nodlymph_order),col=df.color[1:4],show_legend=TRUE,annotation_height=unit(7,"cm"))
+
+
+colors.viridis.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(viridis(n=9),viridis(n=9)[9]), space = "RGB")
+colors.plasma.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(plasma(n=9),plasma(n=9)[9]), space = "RGB")
+colors.inferno.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(inferno(n=9), inferno(n=9)[9]), space="RGB")
+
+
+g<- grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=FALSE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = FALSE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )))
+
+output.filepath<-file.path(output.dir,"baseline","figures","heatmap_VariableGenes_CV0.6_CD4&Phenogroup.pdf")
+ggsave(output.filepath,device="pdf",height=16,width=10,dpi=300,g)
+
+Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=FALSE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = FALSE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )
+```
+
+Here's a heatmap for all variable genes with annotation but clustered.
+
+```{r fig.height=15, fig.width=10}
+Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )
+g<-grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    #cluster_rows=TRUE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    #right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )))
+output.filepath<-file.path(output.dir,"baseline","figures","heatmap_VariableGenes_CV0.6_CD4&Phenogroup_clustered.pdf")
+ggsave(output.filepath,device="pdf",height=15,width=10,dpi=300,g)
+
 ```

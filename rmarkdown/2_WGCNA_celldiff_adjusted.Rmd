@@ -825,6 +825,7 @@ dev.off()
 save.image(file.path(output.dir,"wgcna_cutheights.RData"))
 ```
 
+
 ## Parallele Scripts Generation (not run)
 Here're the R codes that generate the scripts to run all the above steps.
 ```{r 6_WGCNA_new.R,eval=FALSE,echo=TRUE,results='hide'}
@@ -1147,4 +1148,557 @@ The WGCNA analysis identified `r length(unique(net$colors))` gene modules and th
     + Grey60 module
     + Violet module
 3. The identified gene modules above are in general also correlated with the cell differentials. This motivates us to apply WGCNA analysis to the data adjusted for the cell differentials.
+
+
+
+# Results visulization
+
+## Heatmap of correlation with module size
+We generate heatmap of the correlation between clinical traits and gene modules with the gene module size shown.
+
+First, we generate the recoded lymphadenopathy and micronodule phenotype into the clinical traits.
+```{r}
+# load in the clinical data
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-clinic.matrix[,1]
+
+# load in the CT scan data.
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,as.is=TRUE)
+rownames(ct.matrix)<-ct.matrix[,1]
+ct.matrix<-ct.matrix[clinic.matrix$GRADSID,]
+ct.matrix[,1]<-clinic.matrix$GRADSID
+rownames(ct.matrix)<-ct.matrix[,1]
+my.ct.matrix<-ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")]
+clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")],stringsAsFactors=F)
+
+# generate the contingency table
+micronodule.vect<-as.logical(my.ct.matrix[,"Micronodule"]) | as.logical(my.ct.matrix[,"Micronodule_conglomerate"])
+temp1<-my.ct.matrix$Med_Lymphadenopathy
+temp2<-my.ct.matrix$Hilar_Lymphadenopathy
+temp1[!is.na(temp1) & temp1!=0]<-1
+temp2[!is.na(temp2) & temp2!=0]<-1
+lympha.vect<-as.logical(temp1) | as.logical(temp2)
+
+cat("Here's a contingency table showing the overlap between presence of micronodule and lymphadenopathy:\n")
+table(micronodule.vect,lympha.vect)
+cat("\nHere's the breakdown of patients with no micronodule and no lymphadenopathy across the different SCADDING stage:\n")
+table(clinic.matrix$SCADDING[(!micronodule.vect) & (!lympha.vect)])
+cat("\n")
+
+# define a new phenotype "nodule_lymph_pheno" based on these four groups
+my.pheno<-rep("",nrow(clinic.matrix))
+my.pheno[(!micronodule.vect) & (!lympha.vect)]<-"none"
+my.pheno[micronodule.vect & (!lympha.vect)]<-"micronodule"
+my.pheno[(!micronodule.vect) & lympha.vect]<-"lymph"
+my.pheno[micronodule.vect & lympha.vect]<-"both"
+my.pheno[my.pheno==""]<-NA
+clinic.matrix<-cbind(clinic.matrix,my.pheno,stringsAsFactors=F)
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"nodule_lymph_pheno"
+
+new.pheno<-clinic.matrix[,"nodule_lymph_pheno"]
+names(new.pheno)<-rownames(clinic.matrix)
+
+# export the newly defined phenotype into an RDS file
+output.filepath<-file.path("/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/nodule_lymph_pheno.RDS")
+saveRDS(new.pheno,file=output.filepath,refhook = NULL)
+```
+
+First, we load in the WGCNA results and data.
+```{r}
+# These codes load in the WGCNA results of the unadjusted data to extract some of the information
+rm(list=setdiff(ls(),c("figure_nums","figure_nums_3","table_nums","table_nums_3","work.dir")))
+data.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_celladjusted2/CV0_compare/wgcna_cutheights.RData"
+source("/home/yanxiting/driver_Grace/Rprogram/my_functions.R")
+load(data.filepath)
+
+# add the micronodule_lymphadenopathy phenotype into the clinical traits
+new.pheno<-readRDS("/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/nodule_lymph_pheno.RDS",refhook = NULL)
+temp.pheno<-rep(0,length(new.pheno))
+temp.pheno[new.pheno=="lymph"]<-1
+temp.pheno[new.pheno=="micronodule"]<-1
+temp.pheno[new.pheno=="both"]<-2
+names(temp.pheno)<-names(new.pheno)
+temp.pheno<-temp.pheno[colnames(datTraits)]
+datTraits<-rbind(datTraits,temp.pheno)
+rownames(datTraits)[nrow(datTraits)]<-"nodule_lymph_pheno"
+```
+
+
+
+
+Second, we redraw the heatmap of the correlation between clinical traits and gene modules with the module size in it.
+```{r fig.width=10,fig.height=12,cache=FALSE,fig.cap="Heatmap showing the corrleation between the gene modules identified by WGCNA with the clinical traits with gene module size."}
+output.subdir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures"
+
+i<-4
+# in the clinical trait data, remove the redundance traits for lymphaodenopathy and add FEV1/FVC ratio, also try to add the disease severity measure by the phenotypic groups within the treated and the untreated group
+net<-net.list[[i]]
+my.datExpr = datExpr[setdiff(rownames(datExpr),unlist(outlier.list[1:i])), ]
+
+#rename the columns (remove all after _ in sample name)
+SarcaleSamples = rownames(my.datExpr)
+sampleRows =match(SarcaleSamples,rownames(sample.matrix));
+sample.matrix.new=sample.matrix[sampleRows,]
+traitRows = match(sample.matrix.new[,1],colnames(datTraits));
+my.datTraits = datTraits[,traitRows];
+
+# add the FEV1/FVC ratio
+temp.ratio<-as.numeric(my.datTraits["BDFEV1",])/as.numeric(my.datTraits["BDFVC",])
+my.datTraits<-rbind(my.datTraits[1:9,],temp.ratio,my.datTraits[10:nrow(my.datTraits),])
+rownames(my.datTraits)[10]<-"FEV1/FVC ratio"
+
+# get the MEs
+nGenes = ncol(my.datExpr);
+nSamples = nrow(my.datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(my.datExpr, labels2colors(net$colors))$eigengenes
+MEs = orderMEs(MEs0)
+
+geneModuleMembership = as.data.frame(cor(my.datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+
+geneTraitSignificance = as.data.frame(cor(my.datExpr, t(my.datTraits), use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+
+# add the membership results for FEV1/FVC ratio as well but the results will be saved as a different file under the same folder as the previous results without FEV1/FVC ratio
+modNames=substring(names(MEs), 3)
+output.subdir<-file.path("/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_celladjusted2/CV0_compare",paste("ModuleMembership_GSPvalue_outliers_",i,"_withFEV1FVCratio",sep=""))
+if(file.exists(output.subdir)==F){
+dir.create(output.subdir)	
+}
+for(k in 1:length(modNames)){
+output.filepath<-file.path(output.subdir,paste("Module_",modNames[k],"_membership_gsig.txt",sep=""))
+ps.names<-rownames(my.data.matrix)
+gene.names<-unname(sapply(ps.names,my.element.remove,splitchar="_",index=-1))
+temp.color.desig<-labels2colors(net$colors)
+cmd.out<-cbind(ps.names[temp.color.desig==modNames[k]],gene.names[temp.color.desig==modNames[k]],geneModuleMembership[temp.color.desig==modNames[k],colnames(geneModuleMembership)==paste("ME",modNames[k],sep="")],MMPvalue[temp.color.desig==modNames[k],colnames(MMPvalue)==paste("ME",modNames[k],sep="")],geneTraitSignificance[temp.color.desig==modNames[k],],GSPvalue[temp.color.desig==modNames[k],])
+colnames(cmd.out)<-c("ps_names","gene_names","module_membership","module_membership_pvalue",paste("gs_",rownames(my.datTraits),sep=""),paste("gs_",rownames(my.datTraits),"_pvalue",sep=""))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+}
+
+# remove the redundant traits for lymphadenopathy
+
+my.datTraits<-my.datTraits[!rownames(my.datTraits)%in%c("Med_Lymphadenopathy",
+                              "Med_Lymphadenopathy_oneside/bi",
+                              "Med_Lymphadenopathy_numeric",
+                              "Hilar_Lymphadenopathy",
+                              "Hilar_Lymphadenopathy_oneside/bi",
+                              "Hilar_Lymphadenopathy_numeric"),]
+
+rownames(my.datTraits)[rownames(my.datTraits)=="BDFEV1"]<-"FEV1"
+rownames(my.datTraits)[rownames(my.datTraits)=="FEV1PRED"]<-"FEV1% predited"
+rownames(my.datTraits)[rownames(my.datTraits)=="BDFVC"]<-"FVC"
+rownames(my.datTraits)[rownames(my.datTraits)=="FVCPRED"]<-"FVC% predicted"
+rownames(my.datTraits)[rownames(my.datTraits)=="BDDLCO"]<-"DLCO"
+rownames(my.datTraits)[rownames(my.datTraits)=="PREDDLCO"]<-"DLCO% predicted"
+
+rownames(my.datTraits)[rownames(my.datTraits)=="Med_Lymphadenopathy_yes/no"]<-"Med_Lymphadenopathy"
+rownames(my.datTraits)[rownames(my.datTraits)=="Hilar_Lymphadenopathy_yes/no"]<-"Hilar_Lymphadenopathy"
+
+
+rownames(my.datTraits)[rownames(my.datTraits)=="ALVBALD"]<-"MACROPHAGE"
+rownames(my.datTraits)[rownames(my.datTraits)=="EOSBALD"]<-"EOSINOPHIL"
+rownames(my.datTraits)[rownames(my.datTraits)=="LYMBALD"]<-"LYMPHOCYTE"
+rownames(my.datTraits)[rownames(my.datTraits)=="NEUBALD"]<-"NEUTROPHIL"
+rownames(my.datTraits)[rownames(my.datTraits)=="BALLCELL"]<-"TOTAL CELL COUNTS"
+rownames(my.datTraits)[rownames(my.datTraits)=="TREATMENT"]<-"Treatment_Overall"
+rownames(my.datTraits)[rownames(my.datTraits)=="TREATMENT_STAGEII-III"]<-"Treatment_Stage II-III"
+rownames(my.datTraits)[rownames(my.datTraits)=="TREATMENT_STAGEIV"]<-"Treatment_Stage IV"
+
+
+nGenes = ncol(my.datExpr)
+nSamples = nrow(my.datExpr)
+i<-4
+power.selected<-power.vect[i]
+net<-net.list[[i]]
+mergedColors = labels2colors(net$colors)
+
+# generate our own names and the sizes for the modules
+my.temp<-table(mergedColors)
+my.temp<-sort(my.temp,decreasing=T)
+my.names<-names(my.temp)
+modulenames.def<-cbind(names(my.temp),my.names)
+modulenames.def<-as.data.frame(modulenames.def)
+modulenames.def<-cbind(modulenames.def,as.numeric(my.temp))
+rownames(modulenames.def)<-modulenames.def[,1]
+colnames(modulenames.def)<-c("wgcna_names","my_names","module_size")
+
+MEList.test<-moduleEigengenes(my.datExpr,colors=mergedColors)
+MEs.test<-MEList.test$eigengenes
+MEDiss.test<-1-cor(MEs.test)
+METree.test=hclust(as.dist(MEDiss.test),method="average")
+
+nGenes = ncol(my.datExpr);
+nSamples = nrow(my.datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(my.datExpr, labels2colors(net$colors))$eigengenes
+MEs = orderMEs(MEs0)
+
+# only show the correlation for chosen gene modules
+#MEs<-MEs[,colnames(MEs)%in%c("MEturquoise","MEbrown4","MEbrown","MEviolet","MEgrey60")]
+my.ME.names<-modulenames.def[sapply(colnames(MEs),my.element.extract,splitchar="ME",index=-1),"my_names"]
+my.ME.sizes<-modulenames.def[sapply(colnames(MEs),my.element.extract,splitchar="ME",index=-1),"module_size"]
+
+cp = bicorAndPvalue(MEs, t(my.datTraits))
+moduleTraitCor = cp$bicor;
+moduleTraitPvalue = cp$p;
+
+
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+
+# Display the correlation values within a heatmap plot
+output.subdir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures"
+
+temp.moduleTraitPvalue<-moduleTraitPvalue
+temp.moduleTraitCor<-moduleTraitCor
+temp.moduleTraitCor[temp.moduleTraitPvalue>0.05]<-NA
+
+output.filepath<-file.path(output.subdir,paste("WGCNA_celladjusted2_heatmap_trait_correlation_modules_outliers_",i,"_modulenames_def.txt",sep=""))
+write.table(modulenames.def,file=output.filepath,append=F,sep="\t",col.names=T,row.names=F,quote=F)
+
+output.filepath<-file.path(output.subdir,paste("WGCNA_celladjusted2_heatmap_trait_correlation_modules_outliers_",i,"_clean.eps",sep=""))
+postscript(output.filepath,width=10,height=12,paper="special")
+par(mar = c(8, 8, 3, 1));
+labeledHeatmap(Matrix = temp.moduleTraitCor,
+xLabels = rownames(my.datTraits),
+#yLabels = names(MEs),
+yLabels=paste(my.ME.names," (",my.ME.sizes,")",sep=""),
+#ySymbols = names(MEs),
+ySymbols=paste(my.ME.names," (",my.ME.sizes,")",sep=""),
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+#cex.text=0.8,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"),
+naColor="white")
+#savePlot(output.filepath,type="jpeg")
+dev.off()
+
+par(mar = c(8, 8, 3, 1));
+labeledHeatmap(Matrix = temp.moduleTraitCor,
+xLabels = rownames(my.datTraits),
+#yLabels = names(MEs),
+yLabels=paste(my.ME.names," (",my.ME.sizes,")",sep=""),
+#ySymbols = names(MEs),
+ySymbols=paste(my.ME.names," (",my.ME.sizes,")",sep=""),
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+#cex.text=0.8,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"),
+naColor="white")
+
+```
+
+Notes: we have changed the module names but the 5 modules shown in the plot are
+
+```{r results='hold'}
+{
+cat("Module 1 was turquoise Module.\n")
+cat("Module 4 was brown Module.\n")
+cat("Module 18 was grey60 Module.\n")
+cat("Module 33 was violet Module.\n")
+cat("Module 47 was brown4 Module.\n")
+}
+```
+
+
+
+### Figure 3b. Sankey plot of the WGCNA results
+To show the functional analysis of the genes in each chosen module, we generate the sankey plot.
+
+```{r}
+# sankey plot showing the functional analysis results on the identified gene modules.
+source("/home/yanxiting/driver_Grace/Rprogram/my_functions.R")
+data.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/ModuleMembership_GSPvalue_outliers_7_withFEV1FVCratio"
+metacore.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/ModuleMembership_GSPvalue_outliers_7"
+output.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/writings"
+module.choose<-c("turquoise","brown","brown4","violet","grey60")
+
+top.pathway.num<- 5
+min.gene.num<-3
+log.filepath<-file.path(output.dir,paste("Figure3b_unsupervised_sankey_fdr0.05_top",top.pathway.num,"_mingenum",min.gene.num,".html.log",sep=""))
+MMList<-list.files(data.dir)
+
+MMList<-MMList[sapply(MMList,my.element.extract,splitchar="_",index=2)%in%module.choose]
+MMList<-MMList[grep("gsig.txt",MMList)]
+
+ModColList<-c()
+Alledges<-c()
+Allnodes<-c()
+
+# change the column names of the temp.moduleTraitCor to match those in the Module_*_membership_gsig.txt
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FEV1"]<-"BDFEV1"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FEV1% predited"]<-"FEV1PRED"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FVC"]<-"BDFVC"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FVC% predicted"]<-"FVCPRED"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="DLCO"]<-"BDDLCO"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="DLCO% predicted"]<-"PREDDLCO"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Med_Lymphadenopathy"]<-"Med_Lymphadenopathy_yes/no"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Hilar_Lymphadenopathy"]<-"Hilar_Lymphadenopathy_yes/no"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="MACROPHAGE"]<-"ALVBALD"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="EOSINOPHIL"]<-"EOSBALD"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="LYMPHOCYTE"]<-"LYMBALD"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="NEUTROPHIL"]<-"NEUBALD"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="TOTAL CELL COUNTS"]<-"BALLCELL"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Treatment_Overall"]<-"TREATMENT"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Treatment_Stage II-III"]<-"TREATMENT_STAGEII-III"
+colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Treatment_Stage IV"]<-"TREATMENT_STAGEIV"
+
+colnames(temp.moduleTraitPvalue)<-colnames(temp.moduleTraitCor)
+
+node.from<-character()
+node.to<-character()
+edge.val<-numeric()
+edge.type<-character()
+
+for(i in 1:length(MMList)){
+
+  Mmemb<-read.table(file.path(data.dir,MMList[i]),sep="\t",header=T,check.names=F,stringsAsFactors=F)
+  trait.show<-colnames(temp.moduleTraitCor)[!is.na(temp.moduleTraitCor[paste("ME",my.element.extract(MMList[i],splitchar="_",index=2),sep=""),])]
+  trait.pval<-temp.moduleTraitPvalue[paste("ME",my.element.extract(MMList[i],splitchar="_",index=2),sep=""),trait.show]
+  module.size<-nrow(Mmemb)
+  count_p<- (-log(trait.pval,base=2))*module.size/sum((-log(trait.pval,base=2)))
+  
+  #create the edges table
+  ModCol<-unname(sapply(MMList[i],my.element.extract,splitchar="Module_",index=2))
+  ModCol<-unname(sapply(ModCol,my.element.extract,splitchar="_",index=1))
+
+  node.from<-c(node.from,trait.show)
+  node.to<-c(node.to,rep(ModCol, times=length(trait.show)))
+  edge.val<-c(edge.val,count_p)
+  edge.type<-c(edge.type,rep("L1",length(count_p)))
+
+  # add the edges for the positive and negative genes
+  pos.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_posgenes.txt",sep=""))
+  if(file.exists(pos.filepath)==F){
+    cat("WARNING: ",pos.filepath," doesn't exist!\n")
+  }else{
+    temp<-read.table(pos.filepath,sep="\t",header=T,check.names=F)
+    pos.genenum<-nrow(temp)
+  }
+  
+  neg.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_neggenes.txt",sep=""))
+  if(file.exists(neg.filepath)==F){
+    cat("WARNING: ",neg.filepath," doesn't exist!\n",sep="")
+  }else{
+    temp<-read.table(neg.filepath,sep="\t",header=T,check.names=F)
+    neg.genenum<-nrow(temp)
+  }
+  
+  node.from<-c(node.from,ModCol)
+  node.to<-c(node.to, paste(ModCol,"(+)",sep=""))
+  edge.val<-c(edge.val,pos.genenum)
+  edge.type<-c(edge.type,"L2")
+
+  node.from<-c(node.from,ModCol)
+  node.to<-c(node.to, paste(ModCol,"(-)",sep=""))
+  edge.val<-c(edge.val,neg.genenum)
+  edge.type<-c(edge.type,"L2")
+  
+  # add the edges for the positive metacore results
+  metacore.pos.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_posgenes_metacore",sep=""),"Enrichment_analysis.xls")
+  if(file.exists(metacore.pos.filepath)){
+    metac<-read.xls(metacore.pos.filepath,sheet=1,check.names=F,stringsAsFactors = F)
+    colnames(metac)<-c("#","Maps","Total","pValue","MinFDR","ID_p-value","ID_FDR","ID_InData","ID_NetworkObjectsfromActiveData")
+    
+    if(nrow(metac)>=3){
+
+      metac<-metac[3:nrow(metac),2:9]
+      metac$ID_FDR<-as.numeric(metac$ID_FDR)
+
+      #take out fdr > 0.05
+      metac<-metac[metac$ID_FDR < 0.05,]
+      metac<-metac[order(metac$ID_FDR),]
+
+      #only show pathways with min.gene.num genes InData
+      metac<-metac[as.numeric(metac[,"ID_InData"])>=min.gene.num,]
+
+
+      # merge the pathways that are significant due to exactly the same genes
+      if(nrow(metac)>0){
+        temp.index<-split(1:nrow(metac),metac[,"ID_NetworkObjectsfromActiveData"])
+        my.metac<-numeric()
+        for(j in 1:length(temp.index)){
+          if(length(temp.index[[j]])==1){
+            my.metac<-rbind(my.metac,metac[temp.index[[j]],])
+          }else{
+            temp.matrix<-metac[temp.index[[j]],]  
+            temp.result<-temp.matrix[1,]
+            cat(ModCol," (+):\n",sep="",file=log.filepath,append=T)
+            cat(temp.matrix[,1],sep="\n",file=log.filepath,append=T)
+            cat("\n",file=log.filepath,append=T)
+            #temp.result[1,1]<-paste(temp.matrix[,1],collapse="\r")
+            temp.result[1,"ID_FDR"]<-min(temp.matrix[,"ID_FDR"])
+            temp.result[1,"ID_p-value"]<-min(temp.matrix[,"ID_p-value"])
+            my.metac<-rbind(my.metac,temp.result)
+          }
+        }
+        metac<-my.metac
+        metac<-metac[order(as.numeric(metac[,"MinFDR"]),decreasing=F),]
+        fdr.threshold.pos<-max(as.numeric(metac[1:min(top.pathway.num,nrow(metac)),"MinFDR"]))
+        metac<-metac[as.numeric(metac[,"MinFDR"])<=fdr.threshold.pos,]
+        #metac<-metac[1:min(top.pathway.num,nrow(metac)),]
+        
+        if(nrow(metac)>0){
+          node.from<-c(node.from,rep(paste(ModCol,"(+)",sep=""),nrow(metac)))
+          node.to<-c(node.to,metac[,1])
+          edge.val<-c(edge.val,metac[,7])
+          edge.type<-c(edge.type,rep("L3",nrow(metac)))
+        }
+      }
+    }
+
+    
+  }else{
+    cat("WARNING: ",metacore.pos.filepath," doesn't exist!",sep="")
+  }
+  
+  
+  # add the edges for the negative metacore results
+  metacore.neg.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_neggenes_metacore",sep=""),"Enrichment_analysis.xls")
+  if(file.exists(metacore.neg.filepath)){
+    metac2<-read.xls(metacore.neg.filepath,sheet=1,check.names=F,stringsAsFactors = F)
+    colnames(metac2)<-c("#","Maps","Total","pValue","MinFDR","ID_p-value","ID_FDR","ID_InData","ID_NetworkObjectsfromActiveData")
+    
+    if(nrow(metac2)>=3){
+
+      metac2<-metac2[3:nrow(metac2),2:9]
+      metac2$ID_FDR<-as.numeric(metac2$ID_FDR)
+
+      #take out fdr > 0.05
+      metac2<-metac2[metac2$ID_FDR < 0.05,]
+      metac2<-metac2[order(metac2$ID_FDR),]
+
+      #only show pathways with min.gene.num genes InData
+      metac2<-metac2[as.numeric(metac2[,"ID_InData"])>=min.gene.num,]
+
+
+      # merge the pathways that are significant due to exactly the same genes
+      if(nrow(metac2)>0){
+        temp.index<-split(1:nrow(metac2),metac2[,"ID_NetworkObjectsfromActiveData"])
+        my.metac2<-numeric()
+        for(j in 1:length(temp.index)){
+          if(length(temp.index[[j]])==1){
+            my.metac2<-rbind(my.metac2,metac2[temp.index[[j]],])
+          }else{
+            temp.matrix<-metac2[temp.index[[j]],]  
+            temp.result<-temp.matrix[1,]
+            cat(ModCol," (-):\n",sep="",file=log.filepath,append=T)
+            cat(temp.matrix[,1],sep="\n",file=log.filepath,append=T)
+            cat("\n",file=log.filepath,append=T)
+            #temp.result[1,1]<-paste(temp.matrix[,1],collapse="\r")
+            temp.result[1,"ID_FDR"]<-min(temp.matrix[,"ID_FDR"])
+            temp.result[1,"ID_p-value"]<-min(temp.matrix[,"ID_p-value"])
+            my.metac2<-rbind(my.metac2,temp.result)
+          }
+        }
+        metac2<-my.metac2
+        metac2<-metac2[order(as.numeric(metac2[,"MinFDR"]),decreasing=F),]
+        fdr.threshold.neg<-max(as.numeric(metac2[1:min(top.pathway.num,nrow(metac2)),"MinFDR"]))
+        metac2<-metac2[as.numeric(metac2[,"MinFDR"])<=fdr.threshold.neg,]
+        #metac<-metac[1:min(top.pathway.num,nrow(metac)),]
+        
+        if(nrow(metac2)>0){
+          node.from<-c(node.from,rep(paste(ModCol,"(-)",sep=""),nrow(metac2)))
+          node.to<-c(node.to,metac2[,1])
+          edge.val<-c(edge.val,metac2[,7])
+          edge.type<-c(edge.type,rep("L3",nrow(metac2)))
+        }
+      }
+    }
+
+    
+  }else{
+    cat("WARNING: ",metacore.neg.filepath," doesn't exist!",sep="")
+  }
+}  
+  
+Alledges<-data.frame(node.from,node.to,edge.val,edge.type,stringsAsFactors=F)
+colnames(Alledges)<-c("source","target","value","edgetype")
+Alledges<-Alledges[complete.cases(Alledges), ]
+write.table(Alledges,file=file.path(output.dir,paste("Figure3b_unsupervised_sankey_top",top.pathway.num,"_mingenum",min.gene.num,"_fdr0.05.txt")),append=F,row.names=F,col.names=T,sep="\t",quote=F)
+
+cap<-paste("Figure 3b. Sankey plot showing the association of the chosen modules and the clinical traits and the function analysis results of the chosen modules for top.pathway.num=",top.pathway.num,", min.gene.num=",min.gene.num,sep="")
+
+```
+
+```{r figure3b_sankeyplot_unsupervised,eval=TRUE,cache=FALSE,fig.height=15,fig.width=15,fig.cap=cap}
+#nodes.temp2<-unique(Alledges[Alledges[,4]=="L2",1])
+#nodes.temp1<-unique(Alledges[Alledges[,4]=="L1",2])
+#keep.nodes<-intersect(nodes.temp1,nodes.temp2)
+
+#alledges<-Alledges[Alledges[,2]%in%keep.nodes | Alledges[,1]%in%keep.nodes ,1:3]
+alledges<-Alledges[,1:3]
+
+allnodes<-c(alledges$source,alledges$target)
+allnodes<-allnodes[!duplicated(allnodes)]
+
+edges2<-alledges
+
+for(i in 1:nrow(alledges)){
+  
+  edges2[i,1]<-as.integer(match(alledges[i,1],allnodes))-1
+  edges2[i,2]<-as.integer(match(alledges[i,2],allnodes))-1
+  
+}
+
+nodes2<-as.data.frame(allnodes,stringsAsFactors=F)
+colnames(nodes2)<-"name"
+
+edges2[,1]<-as.integer(edges2[,1])
+edges2[,2]<-as.integer(edges2[,2])
+edges2[,3]<-as.numeric(edges2[,3])
+
+temp.cat<-nodes2[,1]
+temp.cat[grep("\\(\\+\\)",temp.cat)]<-"positive"
+temp.cat[grep("\\(\\-\\)",temp.cat)]<-"negative"
+
+nodes2<-cbind(nodes2,temp.cat)
+colnames(nodes2)[2]<-"ngroup"
+
+# change the node names
+nodes2[nodes2[,1]=="BDFEV1",1]<-"FEV1"
+nodes2[nodes2[,1]=="FEV1PRED",1]<-"FEV1% predicted"
+nodes2[nodes2[,1]=="BDFVC",1]<-"FVC"
+nodes2[nodes2[,1]=="FVCPRED",1]<-"FVC% predicted"
+nodes2[nodes2[,1]=="BDDLCO",1]<-"DLCO"
+nodes2[nodes2[,1]=="PREDDLCO",1]<-"DLCO% predicted"
+nodes2[nodes2[,1]=="Med_Lymphadenopathy_yes/no",1]<-"Mediastinal Lymphadenopathy"
+nodes2[nodes2[,1]=="Hilar_Lymphadenopathy_yes/no",1]<-"Hilar Lymphadenopathy"
+nodes2[nodes2[,1]=="ALVBALD",1]<-"MACROPHAGE"
+nodes2[nodes2[,1]=="EOSBALD",1]<-"EOSINOPHIL"
+nodes2[nodes2[,1]=="LYMBALD",1]<-"LYMPHOCYTE"
+nodes2[nodes2[,1]=="NEUBALD",1]<-"NEUTROPHIL"
+nodes2[nodes2[,1]=="BALLCELL",1]<-"TOTAL CELL COUNTS"
+nodes2[nodes2[,1]=="TREATMENT",1]<-"Treatment (overall)"
+nodes2[nodes2[,1]=="TREATMENT_STAGEII-III",1]<-"Treatment (Stage II-III)"
+nodes2[nodes2[,1]=="TREATMENT_STAGEIV",1]<-"Treatment (Stage IV)"
+
+# remove nodes that do not have any associated pathways
+sn<-sankeyNetwork(Links = edges2, Nodes = nodes2, Source = "source", Target = "target", Value = "value",NodeID="name",fontSize=14,sinksRight = F,nodePadding =12,height=800,width=1200,NodeGroup="ngroup")
+
+sn <- onRender(
+  sn,
+  '
+function(el, x) {
+    d3.selectAll(".node text").attr("text-anchor", "begin").attr("x", 30);
+  }
+  '
+)
+sn
+
+# save the network into an eps file
+saveNetwork(network=sn,file = file.path(output.dir,paste("Figure3b_unsupervised_sankey_fdr0.05_top",top.pathway.num,"_mingenum",min.gene.num,".html",sep="")),selfcontained=F)
+
+```
 
