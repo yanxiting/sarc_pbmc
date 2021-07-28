@@ -18,6 +18,37 @@ output:
 knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
 knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
 
+
+library(captioner)
+library(circlize)
+library(clusterProfiler)
+library(corrplot)
+library(ComplexHeatmap)
+library(dplyr)
+library(EnsDb.Hsapiens.v86)
+library(gdata)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(gplots)
+library(grid)
+library(gridExtra)
+library(gridGraphics)
+library(kableExtra)
+library(knitr)
+library(Matrix)
+library(org.Hs.eg.db)
+library(parallel)
+library(reshape2)
+library(scales)
+library(Seurat)
+library(SingleR)
+library(tidyr)
+library(tidyverse)
+library(viridisLite)
+library(xlsx)
+library(randomcoloR)
+
 library(kableExtra)
 library(gdata)
 library(knitr)
@@ -27,6 +58,8 @@ library(rgl)
 library(gplots)
 library(WGCNA)
 library(xlsx)
+library(randomcoloR)
+library(ComplexHeatmap)
 
 knit_hooks$set(webgl = hook_webgl)
 
@@ -777,6 +810,7 @@ save.image(file.path(output.dir,"wgcna_cutheights.RData"))
 ## Results visualization
 We generate heatmap of the correlation between clinical traits and gene modules with the gene module size shown.
 
+### Define lymph_nodule_phenotype
 First, we generate the recoded lymphadenopathy and micronodule phenotype into the clinical traits.
 ```{r eval=FALSE}
 # load in the clinical data
@@ -831,6 +865,7 @@ output.filepath<-file.path("/home/yanxiting/driver_Grace/scratch/GRADS/SARC_resu
 write.xlsx(cmd.out,file=output.filepath,sheetName="Sheet1",col.names=T,row.names=F,append=F)
 ```
 
+### Data loading
 Second, we load in the WGCNA results and the newly defined phenotype based on lymphadenopathy and micronodule.
 ```{r}
 # These codes load in the WGCNA results of the unadjusted data to extract some of the information
@@ -851,7 +886,7 @@ datTraits<-rbind(datTraits,temp.pheno)
 rownames(datTraits)[nrow(datTraits)]<-"nodule_lymph_pheno"
 ```
 
-
+### Heatmap of correlation
 Third, we redraw the heatmap of the correlation between clinical traits and gene modules with the module size in it.
 ```{r fig.width=10,fig.height=5,cache=FALSE,fig.cap="Heatmap showing the corrleation between the gene modules identified by WGCNA with the clinical traits with gene module size."}
 output.subdir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures"
@@ -1023,13 +1058,49 @@ naColor="white")
 
 ```
 
-Fourth, we also show the heatmap of all the interferon gamma genes and mark each gene module.
-```{r heatmap_genemodules}
-# load in the clinical data
-clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
-clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
-rownames(clinic.matrix)<-clinic.matrix[,1]
+### Heatmap of gene expression and gene modules
 
+We first generate a matrix of the clinical traits including the original data, updated data, CRP and CT scan data.
+
+```{r eval=F}
+# These codes only need to be run once. The clinical matrix will be saved into an RDS file.
+# the old.clinic.filepath had SCADDING and more features required for the WGCNA
+# the clinic.filepath had updated features. So we load in both and merge them.
+old.clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clin_data_visit1_XY.csv")
+
+old.clinic.matrix=read.csv(old.clinic.filepath,check.names=F,stringsAsFactors=F)
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+
+common.features<-intersect(colnames(old.clinic.matrix),colnames(clinic.matrix))
+my.data<-clinic.matrix[,common.features]
+
+old.features<-setdiff(colnames(old.clinic.matrix),colnames(clinic.matrix))
+temp<-old.clinic.matrix[,old.features]
+rownames(temp)<-old.clinic.matrix[,1]
+temp<-temp[my.data[,1],]
+my.data<-cbind(my.data,temp)
+
+new.features<-setdiff(colnames(clinic.matrix),colnames(old.clinic.matrix))
+temp<-clinic.matrix[,new.features]
+rownames(temp)<-clinic.matrix[,1]
+temp<-temp[my.data[,1],]
+my.data<-cbind(my.data,temp)
+
+clinic.matrix<-my.data
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,"GRADSID"] # GRADS ID
+clinic.matrix<-clinic.matrix[sample.matrix[,1],]
+
+
+# add the level of CRP 
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data_PBMC/merge_visit_patient_v1.csv")
+temp.matrix<-read.csv(clinic.filepath)
+rownames(temp.matrix)<-temp.matrix[,1]
+temp.matrix<-temp.matrix[rownames(clinic.matrix),]
+clinic.matrix<-cbind(clinic.matrix,temp.matrix[,"crp"])
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"CRP"
+
+# add CT scan data and lymph_nodule_phenotype
 # load in the CT scan data.
 ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
 ct.matrix<-read.xls(ct.filepath,as.is=TRUE)
@@ -1038,54 +1109,49 @@ ct.matrix<-ct.matrix[clinic.matrix$GRADSID,]
 ct.matrix[,1]<-clinic.matrix$GRADSID
 rownames(ct.matrix)<-ct.matrix[,1]
 my.ct.matrix<-ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")]
-clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")])
+clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")],stringsAsFactors=F)
 
-# generate the contingency table
-micronodule.vect<-as.logical(my.ct.matrix[,"Micronodule"]) | as.logical(my.ct.matrix[,"Micronodule_conglomerate"])
-temp1<-my.ct.matrix$Med_Lymphadenopathy
-temp2<-my.ct.matrix$Hilar_Lymphadenopathy
-temp1[!is.na(temp1) & temp1!=0]<-1
-temp2[!is.na(temp2) & temp2!=0]<-1
-lympha.vect<-as.logical(temp1) | as.logical(temp2)
+# load in the lymph_nodule_phenotype
+data.filepath<-file.path("/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/nodule_lymph_pheno.RDS")
+new.pheno<-readRDS(data.filepath,refhook = NULL)
 
-cat("Here's a contingency table showing the overlap between presence of micronodule and lymphadenopathy:\n")
-table(micronodule.vect,lympha.vect)
-cat("\nHere's the breakdown of patients with no micronodule and no lymphadenopathy across the different SCADDING stage:\n")
-table(clinic.matrix$SCADDING[(!micronodule.vect) & (!lympha.vect)])
-cat("\n")
-
-# define a new phenotype "nodule_lymph_pheno" based on these four groups
-my.pheno<-rep("",nrow(clinic.matrix))
-my.pheno[(!micronodule.vect) & (!lympha.vect)]<-"none"
-my.pheno[micronodule.vect & (!lympha.vect)]<-"micronodule"
-my.pheno[(!micronodule.vect) & lympha.vect]<-"lymph"
-my.pheno[micronodule.vect & lympha.vect]<-"both"
-my.pheno[my.pheno==""]<-NA
-clinic.matrix<-cbind(clinic.matrix,my.pheno)
+clinic.matrix<-cbind(clinic.matrix,new.pheno[rownames(clinic.matrix)])
 colnames(clinic.matrix)[ncol(clinic.matrix)]<-"nodule_lymph_pheno"
 
-# load in the IFN-gamma signaling gene
-data.filepath<-file.path(output.dir,"data","Interferon_gamma_signaling_metacore.xls")
-gene.list<-read.xls(data.filepath,check.names=F,skip=2,stringsAsFactors=F)
-gene.list<-gene.list[gene.list$'Gene Symbol'!="",]
-gene.list<-unique(gene.list$`Gene Symbol`) 
-length(gene.list)
+# output the complete clinical matrix
+output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
+saveRDS(clinic.matrix,file=output.filepath,refhook = NULL)
+```
 
-# load in the gene expression data
-# fpkm.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt"
-data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
-fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+Then we show the heatmap of all the interferon gamma genes and mark each gene module.
+```{r heatmap_genemodules,fig.width=10,fig.height=20}
+# load in the clinic data
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
 
-# load in the fpkm matrix
-fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
-fpkm.matrix.anno<-fpkm.matrix[,1:5]
-fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+# load in the WGCNA gene module lists
+wgcna.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA_IFNgamma/CV0_compare"
+module.names<-c("turquoise","grey")
+
+fpkm.matrix<-numeric()
+genes.module<-list()
+module.names.vect<-character()
+for(i in 1:length(module.names)){
+  data.filepath<-file.path(wgcna.dir,"ModuleClustering_outliers_5",paste("Module_",module.names[i],"_nooutliers_fpkm.txt",sep=""))
+  temp.matrix<-read.table(data.filepath,sep="\t",header=T,check.names=F,row.names=1)
+  
+  if(i==1){
+    fpkm.matrix<-temp.matrix
+  }else{
+    fpkm.matrix<-rbind(fpkm.matrix,temp.matrix[,colnames(fpkm.matrix)])  
+  }
+  genes.module[[i]]<-rownames(temp.matrix)
+  module.names.vect<-c(module.names.vect,rep(module.names[i],nrow(temp.matrix)))
+}
+
 
 # generate the heatmap for the genes in gene.list only
-data.matrix<-fpkm.matrix[fpkm.matrix.anno[,1]%in%gene.list,]
-data.matrix.anno<-fpkm.matrix.anno[fpkm.matrix.anno[,1]%in%gene.list,]
-rownames(data.matrix)<-data.matrix.anno[,1]
-
+data.matrix<-fpkm.matrix
 unityNormalize <- function(x){
      return((x-min(x))/(max(x)-min(x)))
 }
@@ -1168,18 +1234,21 @@ names(df.color)<-c("phenogroup","cd4","cd4_binary","nodule_lymph_pheno","subject
 #col.annotation<-HeatmapAnnotation(celltype=celltype_order,disease=disease_order,subject=subject_order,col=df.color,show_legend=FALSE,annotation_height=unit(7,"cm"))
 col.annotation<-HeatmapAnnotation(df=data.frame(phenogroup=phenogroup_order,cd4=cd4_order,cd4_binary=cd4bin_order,nodule_lymph_pheno=nodlymph_order),col=df.color[1:4],show_legend=TRUE,annotation_height=unit(7,"cm"))
 
+temp.color<-unique(module.names.vect)
+names(temp.color)<-unique(module.names.vect)
+row.annotation<-rowAnnotation(module=factor(module.names.vect),col=list(module=temp.color))
+#  HeatmapAnnotation(df=data.frame(module=module.names.vect),col=list(module=temp.color))
 
 colors.viridis.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(viridis(n=9),viridis(n=9)[9]), space = "RGB")
 colors.plasma.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(plasma(n=9),plasma(n=9)[9]), space = "RGB")
 colors.inferno.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(inferno(n=9), inferno(n=9)[9]), space="RGB")
 
-
-g<- grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+Heatmap(as.matrix(my.data.norm), 
     col= colors.inferno.unity,
     #column_split= factor(celltype_order, levels=cluster.chosen),
     #row_split=factor(row_celltype_order,levels=cluster.chosen),
-    #cluster_rows=TRUE,
-    cluster_columns=FALSE,
+    cluster_rows=FALSE,
+    cluster_columns=TRUE,
     #column_order=my.column.order,
     #row_order=hclust(dist(my.data.norm))$order,
     cluster_column_slices=FALSE,
@@ -1190,21 +1259,180 @@ g<- grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm),
     column_dend_reorder=TRUE,
     #row_names_gp = gpar(fontsize = 6),
     show_row_names = TRUE,
-    #right_annotation=row.annotation,
+    right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )
+g<-grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    cluster_rows=FALSE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    right_annotation=row.annotation,
     use_raster=FALSE,
     heatmap_legend_param=list(title = "Expression"),
     show_heatmap_legend = TRUE
     )))
+output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures/heatmap_WGCNA_IFNgamma_CD4&Phenogroup_clustered.pdf"
+ggsave(output.filepath,device="pdf",height=20,width=10,dpi=300,g)
 
-output.filepath<-file.path(output.dir,"baseline","figures","heatmap_IFNGsignaling_CD4&Phenogroup.pdf")
-ggsave(output.filepath,device="pdf",height=16,width=10,dpi=300,g)
+```
+
+We observed:
+
+* WGCNA identified turquoise module that includes most of the genes but there are obvious subclusters of genes within the turquoise module. 
+* Some genes in the grey module are also correlated with genes in the turquoise module although it's obvious that genes with very low variation are all put into the grey module.
+
+Based on our observations, we may simply remove genes with small variation for the patient clustering analysis.
+
+# Patient clustering
+
+## Remove genes with low variation
+```{r remove_lowvar_genes,fig.width4,fig.height=4}
+# load in the clinic data
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+
+# load in the gene expression data
+# fpkm.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+
+# generate the heatmap for the genes in gene.list only
+data.matrix<-fpkm.matrix[fpkm.matrix.anno[,1]%in%gene.list,]
+data.matrix.anno<-fpkm.matrix.anno[fpkm.matrix.anno[,1]%in%gene.list,]
+rownames(data.matrix)<-data.matrix.anno[,1]
+
+unityNormalize <- function(x){
+     return((x-min(x))/(max(x)-min(x)))
+}
+
+my.data.norm<-t(apply(as.matrix(data.matrix), 1, unityNormalize))  
+my.clinic.matrix<-clinic.matrix[colnames(my.data.norm),]
+my.clinic.matrix[!is.na(my.clinic.matrix[,"cd4"]) &my.clinic.matrix[,"cd4"]<0,"cd4"]<-NA
+
+# dichotomize CD4 level
+temp.vect<-my.clinic.matrix$cd4
+temp.vect[my.clinic.matrix$cd4<400]<-"low"
+temp.vect[my.clinic.matrix$cd4>=400]<-"high"
+my.clinic.matrix<-cbind(my.clinic.matrix,temp.vect)
+colnames(my.clinic.matrix)[ncol(my.clinic.matrix)]<-"cd4_bin"
+
+
+# Calculate the coefficient of variation and the variation for each gene.
+my.sd<-apply(my.data.norm,1,sd)
+my.mean<-apply(data.matrix,1,mean)
+my.cv<-apply(data.matrix,1,sd)/my.mean
+
+hist(my.sd,breaks=100)
+hist(my.cv,breaks=100)
+
+```
+
+
+```{r}
+# Show the heatmaps of expression by sorting genes based on both SD and CV.
+# sort the cells for cell types, disease and subjects
+temp.row.data<-data.frame(GeneNames=rownames(my.data.norm),SD=my.sd,CV=my.cv,stringsAsFactors=F)
+
+temp.meta.data<-data.frame(cellBarcode=1:ncol(my.data.norm),phenogroup=my.clinic.matrix[,"PHENGRP"],cd4=my.clinic.matrix[,"cd4"],cd4bin=my.clinic.matrix[,"cd4_bin"],nodulelymph=my.clinic.matrix[,"nodule_lymph_pheno"],subject.names=my.clinic.matrix[,1],stringsAsFactors=F)
+
+column_order <- temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cellBarcode)
+
+phenogroup_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(phenogroup)
+
+cd4_order <- temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cd4)
+
+cd4bin_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(cd4bin)
+
+nodlymph_order<-temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(nodulelymph)
+    
+subject_order <- temp.meta.data %>% 
+    arrange(phenogroup, cd4) %>%
+    pull(subject.names)
+
+my.data<-my.data.norm[,column_order]
+
+######
+# define the color
+my.colors<-randomColor(count = length(unique(my.clinic.matrix[,"PHENGRP"])),hue="random",luminosity="dark")
+#my.colors<-distinctColorPalette(k=length(unique(my.clinic.matrix[,"PHENGRP"])),altCol=FALSE,runTsne=TRUE)
+df.color<-list()
+
+# colors for phenotypic groups
+temp.vect<-my.colors
+names(temp.vect)<-unique(my.clinic.matrix$PHENGRP)
+df.color[[1]]<-temp.vect
+
+# color for cd4
+#df.color[[2]]<-c("control"="lightgreen","asthma"="salmon")
+df.color[[2]]<-colorRamp2(c(0, 1000, 2000), c("blue", "white", "red"))
+
+# color for cd4_binary
+temp.vect<-c("purple","yellow")
+names(temp.vect)<-c("low","high")
+df.color[[3]]<-temp.vect
+
+
+# color for nodule_lympha_pheno
+
+temp.vect<-c("white","lightpink","red","brown")
+names(temp.vect)<-c("none","lymph","micronodule","both")
+df.color[[4]]<-temp.vect
+
+# color for subject
+temp.vect<-randomColor(length(unique(my.clinic.matrix[,1])))
+names(temp.vect)<-unique(as.character(subject_order))
+df.color[[5]]<-temp.vect
+
+names(df.color)<-c("phenogroup","cd4","cd4_binary","nodule_lymph_pheno","subject")
+
+# create the heatmap annotation
+#col.annotation<-HeatmapAnnotation(celltype=celltype_order,disease=disease_order,subject=subject_order,col=df.color,show_legend=FALSE,annotation_height=unit(7,"cm"))
+col.annotation<-HeatmapAnnotation(df=data.frame(phenogroup=phenogroup_order,cd4=cd4_order,cd4_binary=cd4bin_order,nodule_lymph_pheno=nodlymph_order),col=df.color[1:4],show_legend=TRUE,annotation_height=unit(7,"cm"))
+
+temp.color<-unique(module.names.vect)
+names(temp.color)<-unique(module.names.vect)
+row.annotation<-rowAnnotation(module=factor(module.names.vect),col=list(module=temp.color))
+#  HeatmapAnnotation(df=data.frame(module=module.names.vect),col=list(module=temp.color))
+
+colors.viridis.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(viridis(n=9),viridis(n=9)[9]), space = "RGB")
+colors.plasma.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(plasma(n=9),plasma(n=9)[9]), space = "RGB")
+colors.inferno.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(inferno(n=9), inferno(n=9)[9]), space="RGB")
 
 Heatmap(as.matrix(my.data.norm), 
     col= colors.inferno.unity,
     #column_split= factor(celltype_order, levels=cluster.chosen),
     #row_split=factor(row_celltype_order,levels=cluster.chosen),
-    #cluster_rows=TRUE,
-    cluster_columns=FALSE,
+    cluster_rows=FALSE,
+    cluster_columns=TRUE,
     #column_order=my.column.order,
     #row_order=hclust(dist(my.data.norm))$order,
     cluster_column_slices=FALSE,
@@ -1215,12 +1443,39 @@ Heatmap(as.matrix(my.data.norm),
     column_dend_reorder=TRUE,
     #row_names_gp = gpar(fontsize = 6),
     show_row_names = TRUE,
-    #right_annotation=row.annotation,
+    right_annotation=row.annotation,
     use_raster=FALSE,
     heatmap_legend_param=list(title = "Expression"),
     show_heatmap_legend = TRUE
     )
+g<-grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
+    col= colors.inferno.unity,
+    #column_split= factor(celltype_order, levels=cluster.chosen),
+    #row_split=factor(row_celltype_order,levels=cluster.chosen),
+    cluster_rows=FALSE,
+    cluster_columns=TRUE,
+    #column_order=my.column.order,
+    #row_order=hclust(dist(my.data.norm))$order,
+    cluster_column_slices=FALSE,
+    top_annotation=col.annotation,
+    show_column_names=FALSE,
+    #column_title_side="top",
+    #column_title_rot = 0,
+    column_dend_reorder=TRUE,
+    #row_names_gp = gpar(fontsize = 6),
+    show_row_names = TRUE,
+    right_annotation=row.annotation,
+    use_raster=FALSE,
+    heatmap_legend_param=list(title = "Expression"),
+    show_heatmap_legend = TRUE
+    )))
+output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures/heatmap_WGCNA_IFNgamma_CD4&Phenogroup_clustered.pdf"
+ggsave(output.filepath,device="pdf",height=20,width=10,dpi=300,g)
+
 ```
+
+
+# old
 
 ```{r}
 # load in the interferon gamma genes
@@ -1230,8 +1485,6 @@ gene.list<-gene.list[gene.list$'Gene Symbol'!="",]
 gene.list<-unique(gene.list$`Gene Symbol`) 
 length(gene.list)
 ```
-
-# old
 ## Figure 3b. Sankey plot of the WGCNA results
 To show the functional analysis of the genes in each chosen module, we generate the sankey plot.
 
