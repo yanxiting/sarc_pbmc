@@ -223,13 +223,13 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           output.dir=output.folder,
                           suffix.name="analysis3"
                           )
-# generate the files for analysis 4
+# generate the files for analysis 4. If we directly specify group1.values using numbers, it won't work. I had to specify them to be a space+number as a character.
 varnames<-c("nodule_lymph_pheno","steroid_atv1","dmard_atv1")
 my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           clinic.filepath = clinic.file,
                           var.names = varnames,
-                          group1.values = data.frame(nodule_lymph_pheno=c("lymph"),steroid_atv1=c(0),dmard_atv1=c(0)),
-                          group2.values = data.frame(nodule_lymph_pheno=c("micronodule","both"),steroid_atv1=c(0,0),dmard_atv1=c(0,0)),
+                          group1.values = data.frame(nodule_lymph_pheno=c("lymph"),steroid_atv1=c(" 0"),dmard_atv1=c(" 0")),
+                          group2.values = data.frame(nodule_lymph_pheno=c("micronodule","both"),steroid_atv1=c(" 0"," 0"),dmard_atv1=c(" 0"," 0")),
                           output.dir=output.folder,
                           suffix.name="analysis4"
                           )
