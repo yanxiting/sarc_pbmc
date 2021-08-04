@@ -86,8 +86,6 @@ In this note, we generate the input files for GSEA to conduct gene set enrichmen
 
 We generate input files for the differential expressed genes between nonacute stage I untreated vs all other groups based on Laura's observations. 
 
-
-
 ```{r}
 
 # output the merged clinical data matrix as a txt file
