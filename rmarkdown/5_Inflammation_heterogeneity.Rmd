@@ -40,6 +40,7 @@ library(knitr)
 library(Matrix)
 library(org.Hs.eg.db)
 library(parallel)
+library(qwraps2)
 library(reshape2)
 library(scales)
 library(Seurat)
@@ -1341,7 +1342,7 @@ fpkm.matrix<-fpkm.matrix[temp.vect%in%module.gene.list[[2]],]
 fpkm.matrix.anno<-fpkm.matrix.anno[temp.vect%in%module.gene.list[[2]],]
 ```
 
-* Cluster patients using hierarchical clustering.
+* Cluster patients using K-means clustering.
 
 ```{r fig.width=12,fig.height=16}
 # conduct K-means clustering using different K and visualize the clustering results to choose the best K.
@@ -1406,6 +1407,103 @@ ggsave(file=output.filepath,width = 200, height =  200, units = "mm", g)
 
 ```
 
+* Correlate the clsutering results with clinical data.
+
+```{r}
+# load in the clustering results
+kmeans.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/kmeans_IFNgamma","kmeans_k6_patient_clustering.txt")
+kmeans.k<-6
+kmeans.clustering<-read.table(kmeans.filepath,sep="\t",header=T,check.names=F)
+temp<-kmeans.clustering[,2]
+names(temp)<-kmeans.clustering[,1]
+kmeans.clustering<-temp
+kmeans.clustering<-kmeans.clustering[rownames(clinic.matrix)]
+
+# correlate the clustering results with clinical traits using 
+feature.names<-c("GENDER","RACE","AGE","ethor","wbc","cd4","cal","d25","d125","crp","p_lymph","p_mono","p_neut","p_eos","p_baso","BDFVC","POSTFVC","FVCPRED","BDFEV1","POSTFEV1","FEV1PRED","BDDLCO","PREDDLCO","SCADDING","PHENGRP","smoke","steroid_atv1","dmard_atv1","nodule_lymph_pheno")
+feature.types<-c("cat","cat","con","cat",rep("con",19),"cat","cat","cat","cat","cat","cat")
+
+my.data<-cbind(clinic.matrix,kmeans.clustering)
+
+orig_opt <- options()$qwraps2_markup
+options(qwraps2_markup = "markdown")
+
+my_summary<-list( "Gender"=list("female"= ~ qwraps2::n_perc0(GENDER==0,na_rm = T),"male"=~ qwraps2::n_perc0(GENDER==1,na_rm = T)),
+                 "Race"=list("White"= ~ qwraps2::n_perc0(RACE==0,na_rm = T),
+                             "Black"=~ qwraps2::n_perc0(RACE==1,na_rm = T),
+                             "Other"=~ qwraps2::n_perc0(RACE>1,na_rm = T)),
+                 "Age"=list("mean (sd)"= ~ qwraps2::mean_sd(AGE,na_rm = T)),
+                 "ethor"=list("yes"= ~ qwraps2::n_perc0(ethor==1,na_rm = T),
+                              "no"=~ qwraps2::n_perc0(ethor==0,na_rm = T)),
+                 "WBC"=list("mean (sd)"= ~ qwraps2::mean_sd(wbc,na_rm = T)),
+                 "CD4"=list("mean (sd)"= ~ qwraps2::mean_sd(cd4,na_rm = T)),
+                 "CALCIUM"=list("mean (sd)"= ~ qwraps2::mean_sd(cal,na_rm = T)),
+                 "D25"=list("mean (sd)"= ~ qwraps2::mean_sd(d25,na_rm = T)),
+                 "D125"=list("mean (sd)"= ~ qwraps2::mean_sd(d125,na_rm = T)),
+                 "CRP"=list("mean (sd)"= ~ qwraps2::mean_sd(crp,na_rm = T)),
+                 "Lymphocytes %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_lymph,na_rm = T)),
+                 "Monocytes %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_mono,na_rm = T)),
+                 "Neutrophils %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_neut,na_rm = T)),
+                 "Eosinophils %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_eos,na_rm = T)),
+                 "Basophils %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_baso,na_rm = T)),
+                 "FVC (pre)"=list("mean (sd)"= ~ qwraps2::mean_sd(BDFVC,na_rm = T)),
+                 "FVC (post)"=list("mean (sd)"= ~ qwraps2::mean_sd(POSTFVC,na_rm = T)),
+                 "FVC %"=list("mean (sd)"= ~ qwraps2::mean_sd(FVCPRED,na_rm = T)),
+                 "FEV1 (pre)"=list("mean (sd)"= ~ qwraps2::mean_sd(BDFEV1,na_rm = T)),
+                 "FEV1 (post)"=list("mean (sd)"= ~ qwraps2::mean_sd(POSTFEV1,na_rm = T)),
+                 "FEV1 %"=list("mean (sd)"= ~ qwraps2::mean_sd(FEV1PRED,na_rm = T)),
+                 "DLCO (pre)"=list("mean (sd)"= ~ qwraps2::mean_sd(BDDLCO,na_rm = T)),
+                 "DLCO %"=list("mean (sd)"= ~ qwraps2::mean_sd(PREDDLCO,na_rm = T)),
+                 "Scadding Stage"=list("0"= ~ qwraps2::n_perc0(SCADDING=="0",na_rm = T),
+                                       "I"=~ qwraps2::n_perc0(SCADDING=="I",na_rm = T),
+                                       "II"= ~ qwraps2::n_perc0(SCADDING=="II",na_rm = T),
+                                       "III"= ~ qwraps2::n_perc0(SCADDING=="III",na_rm = T),
+                                       "IV"= ~ qwraps2::n_perc0(SCADDING=="IV",na_rm = T)),
+                 "Phenotypic Group"=list("Multi-organ"= ~ qwraps2::n_perc0(PHENGRP=="Multi-organ",na_rm = T),
+                                "Remitting, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Remitting, untreated",na_rm = T),
+                                "Cardiac defining therapy"= ~ qwraps2::n_perc0(PHENGRP=="Cardiac defining therapy",na_rm = T),
+                      "Acute SARC, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Acute Sarcoidosis, untreated",na_rm = T),
+                      "Stage I, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Non-acute, Stage I, untreated",na_rm = T),
+                      "Stage II-III, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Stage II-III, untreated",na_rm = T),
+                      "Stage IV, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Stage IV, untreated",na_rm = T),
+                      "Stage II-III, treated"= ~ qwraps2::n_perc0(PHENGRP=="Stage II-III, treated",na_rm = T),
+                      "Stage IV, treated"= ~ qwraps2::n_perc0(PHENGRP=="Stage IV, treated",na_rm = T)),
+                 "Smoking"=list("yes"= ~ qwraps2::n_perc0(smoke==1,na_rm = T),"no"=~ qwraps2::n_perc0(smoke==0,na_rm = T)),
+                 "Steroid usage"=list("yes"= ~ qwraps2::n_perc0(steroid_atv1==1,na_rm = T),"no"=~ qwraps2::n_perc0(steroid_atv1==0,na_rm = T)),
+                 "Dmard"=list("yes"= ~ qwraps2::n_perc0(dmard_atv1==1,na_rm = T),"no"=~ qwraps2::n_perc0(dmard_atv1==0,na_rm = T)),
+                 "Lymph Nodule Pheno"=list("none"= ~ qwraps2::n_perc0(nodule_lymph_pheno=="none",na_rm = T),
+                "lymph only"=~ qwraps2::n_perc0(nodule_lymph_pheno=="lymph",na_rm = T),
+                "both"= ~ qwraps2::n_perc0(nodule_lymph_pheno=="both",na_rm = T),
+                "micronodule only"= ~ qwraps2::n_perc0(nodule_lymph_pheno=="micronodule",na_rm = T))
+                 )
+
+#whole_table<-summary_table(my.data,my_summary,by="kmeans.clustering")
+#whole_table
+
+# add p value into the summary table
+pvalue.vect<-numeric()
+for(i in 1:length(feature.names)){
+  if(feature.types[i]=="con"){
+    pvalue.vect<-c(pvalue.vect,kruskal.test(clinic.matrix[,feature.names[i]] ~ as.factor(my.data$kmeans.clustering))$p.value)
+  }else{
+    temp.vect<-clinic.matrix[,feature.names[i]]
+    if(feature.names[i]=="RACE"){
+      temp.vect[temp.vect>1]<-NA
+    }
+    y<-my.data$kmeans.clustering
+    y<-y[!is.na(temp.vect)]
+    temp.vect<-temp.vect[!is.na(temp.vect)]
+    pvalue.vect<-c(pvalue.vect,chisq.test(x=as.factor(temp.vect),y=as.factor(y))$p.value)
+  }
+}
+
+my_summary<-setNames(my_summary,paste(names(my_summary),": P-value=",formatC(pvalue.vect,digits=4),sep=""))
+
+whole_table<-summary_table(my.data,my_summary,by="kmeans.clustering")
+whole_table
+
+```
+
 ## Remove genes with low variation
 ```{r remove_lowvar_genes,fig.width4,fig.height=4}
 # load in the clinic data
@@ -1452,762 +1550,3 @@ hist(my.sd,breaks=100)
 hist(my.cv,breaks=100)
 
 ```
-
-
-```{r}
-# Show the heatmaps of expression by sorting genes based on both SD and CV.
-# sort the cells for cell types, disease and subjects
-temp.row.data<-data.frame(GeneNames=rownames(my.data.norm),SD=my.sd,CV=my.cv,stringsAsFactors=F)
-
-temp.meta.data<-data.frame(cellBarcode=1:ncol(my.data.norm),phenogroup=my.clinic.matrix[,"PHENGRP"],cd4=my.clinic.matrix[,"cd4"],cd4bin=my.clinic.matrix[,"cd4_bin"],nodulelymph=my.clinic.matrix[,"nodule_lymph_pheno"],subject.names=my.clinic.matrix[,1],stringsAsFactors=F)
-
-column_order <- temp.meta.data %>% 
-    arrange(phenogroup, cd4) %>%
-    pull(cellBarcode)
-
-phenogroup_order<-temp.meta.data %>% 
-    arrange(phenogroup, cd4) %>%
-    pull(phenogroup)
-
-cd4_order <- temp.meta.data %>% 
-    arrange(phenogroup, cd4) %>%
-    pull(cd4)
-
-cd4bin_order<-temp.meta.data %>% 
-    arrange(phenogroup, cd4) %>%
-    pull(cd4bin)
-
-nodlymph_order<-temp.meta.data %>% 
-    arrange(phenogroup, cd4) %>%
-    pull(nodulelymph)
-    
-subject_order <- temp.meta.data %>% 
-    arrange(phenogroup, cd4) %>%
-    pull(subject.names)
-
-my.data<-my.data.norm[,column_order]
-
-######
-# define the color
-my.colors<-randomColor(count = length(unique(my.clinic.matrix[,"PHENGRP"])),hue="random",luminosity="dark")
-#my.colors<-distinctColorPalette(k=length(unique(my.clinic.matrix[,"PHENGRP"])),altCol=FALSE,runTsne=TRUE)
-df.color<-list()
-
-# colors for phenotypic groups
-temp.vect<-my.colors
-names(temp.vect)<-unique(my.clinic.matrix$PHENGRP)
-df.color[[1]]<-temp.vect
-
-# color for cd4
-#df.color[[2]]<-c("control"="lightgreen","asthma"="salmon")
-df.color[[2]]<-colorRamp2(c(0, 1000, 2000), c("blue", "white", "red"))
-
-# color for cd4_binary
-temp.vect<-c("purple","yellow")
-names(temp.vect)<-c("low","high")
-df.color[[3]]<-temp.vect
-
-
-# color for nodule_lympha_pheno
-
-temp.vect<-c("white","lightpink","red","brown")
-names(temp.vect)<-c("none","lymph","micronodule","both")
-df.color[[4]]<-temp.vect
-
-# color for subject
-temp.vect<-randomColor(length(unique(my.clinic.matrix[,1])))
-names(temp.vect)<-unique(as.character(subject_order))
-df.color[[5]]<-temp.vect
-
-names(df.color)<-c("phenogroup","cd4","cd4_binary","nodule_lymph_pheno","subject")
-
-# create the heatmap annotation
-#col.annotation<-HeatmapAnnotation(celltype=celltype_order,disease=disease_order,subject=subject_order,col=df.color,show_legend=FALSE,annotation_height=unit(7,"cm"))
-col.annotation<-HeatmapAnnotation(df=data.frame(phenogroup=phenogroup_order,cd4=cd4_order,cd4_binary=cd4bin_order,nodule_lymph_pheno=nodlymph_order),col=df.color[1:4],show_legend=TRUE,annotation_height=unit(7,"cm"))
-
-temp.color<-unique(module.names.vect)
-names(temp.color)<-unique(module.names.vect)
-row.annotation<-rowAnnotation(module=factor(module.names.vect),col=list(module=temp.color))
-#  HeatmapAnnotation(df=data.frame(module=module.names.vect),col=list(module=temp.color))
-
-colors.viridis.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(viridis(n=9),viridis(n=9)[9]), space = "RGB")
-colors.plasma.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(plasma(n=9),plasma(n=9)[9]), space = "RGB")
-colors.inferno.unity <- colorRamp2(c(0, 1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10, 1), c(inferno(n=9), inferno(n=9)[9]), space="RGB")
-
-Heatmap(as.matrix(my.data.norm), 
-    col= colors.inferno.unity,
-    #column_split= factor(celltype_order, levels=cluster.chosen),
-    #row_split=factor(row_celltype_order,levels=cluster.chosen),
-    cluster_rows=FALSE,
-    cluster_columns=TRUE,
-    #column_order=my.column.order,
-    #row_order=hclust(dist(my.data.norm))$order,
-    cluster_column_slices=FALSE,
-    top_annotation=col.annotation,
-    show_column_names=FALSE,
-    #column_title_side="top",
-    #column_title_rot = 0,
-    column_dend_reorder=TRUE,
-    #row_names_gp = gpar(fontsize = 6),
-    show_row_names = TRUE,
-    right_annotation=row.annotation,
-    use_raster=FALSE,
-    heatmap_legend_param=list(title = "Expression"),
-    show_heatmap_legend = TRUE
-    )
-g<-grid.grabExpr(draw(Heatmap(as.matrix(my.data.norm), 
-    col= colors.inferno.unity,
-    #column_split= factor(celltype_order, levels=cluster.chosen),
-    #row_split=factor(row_celltype_order,levels=cluster.chosen),
-    cluster_rows=FALSE,
-    cluster_columns=TRUE,
-    #column_order=my.column.order,
-    #row_order=hclust(dist(my.data.norm))$order,
-    cluster_column_slices=FALSE,
-    top_annotation=col.annotation,
-    show_column_names=FALSE,
-    #column_title_side="top",
-    #column_title_rot = 0,
-    column_dend_reorder=TRUE,
-    #row_names_gp = gpar(fontsize = 6),
-    show_row_names = TRUE,
-    right_annotation=row.annotation,
-    use_raster=FALSE,
-    heatmap_legend_param=list(title = "Expression"),
-    show_heatmap_legend = TRUE
-    )))
-output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures/heatmap_WGCNA_IFNgamma_CD4&Phenogroup_clustered.pdf"
-ggsave(output.filepath,device="pdf",height=20,width=10,dpi=300,g)
-
-```
-
-
-# old
-
-```{r}
-# load in the interferon gamma genes
-data.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/Interferon_gamma_signaling_metacore.xls"
-gene.list<-read.xls(data.filepath,check.names=F,skip=2,stringsAsFactors=F)
-gene.list<-gene.list[gene.list$'Gene Symbol'!="",]
-gene.list<-unique(gene.list$`Gene Symbol`) 
-length(gene.list)
-```
-## Figure 3b. Sankey plot of the WGCNA results
-To show the functional analysis of the genes in each chosen module, we generate the sankey plot.
-
-```{r}
-# sankey plot showing the functional analysis results on the identified gene modules.
-source("/home/yanxiting/driver_Grace/Rprogram/my_functions.R")
-data.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/ModuleMembership_GSPvalue_outliers_7_withFEV1FVCratio"
-metacore.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/ModuleMembership_GSPvalue_outliers_7"
-output.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/writings"
-module.choose<-c("turquoise","brown","brown4","violet","grey60")
-
-top.pathway.num<- 5
-min.gene.num<-3
-log.filepath<-file.path(output.dir,paste("Figure3b_unsupervised_sankey_fdr0.05_top",top.pathway.num,"_mingenum",min.gene.num,".html.log",sep=""))
-MMList<-list.files(data.dir)
-
-MMList<-MMList[sapply(MMList,my.element.extract,splitchar="_",index=2)%in%module.choose]
-MMList<-MMList[grep("gsig.txt",MMList)]
-
-ModColList<-c()
-Alledges<-c()
-Allnodes<-c()
-
-# change the column names of the temp.moduleTraitCor to match those in the Module_*_membership_gsig.txt
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FEV1"]<-"BDFEV1"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FEV1% predited"]<-"FEV1PRED"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FVC"]<-"BDFVC"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="FVC% predicted"]<-"FVCPRED"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="DLCO"]<-"BDDLCO"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="DLCO% predicted"]<-"PREDDLCO"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Med_Lymphadenopathy"]<-"Med_Lymphadenopathy_yes/no"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Hilar_Lymphadenopathy"]<-"Hilar_Lymphadenopathy_yes/no"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="MACROPHAGE"]<-"ALVBALD"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="EOSINOPHIL"]<-"EOSBALD"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="LYMPHOCYTE"]<-"LYMBALD"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="NEUTROPHIL"]<-"NEUBALD"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="TOTAL CELL COUNTS"]<-"BALLCELL"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Treatment_Overall"]<-"TREATMENT"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Treatment_Stage II-III"]<-"TREATMENT_STAGEII-III"
-colnames(temp.moduleTraitCor)[colnames(temp.moduleTraitCor)=="Treatment_Stage IV"]<-"TREATMENT_STAGEIV"
-
-colnames(temp.moduleTraitPvalue)<-colnames(temp.moduleTraitCor)
-
-node.from<-character()
-node.to<-character()
-edge.val<-numeric()
-edge.type<-character()
-
-for(i in 1:length(MMList)){
-
-  Mmemb<-read.table(file.path(data.dir,MMList[i]),sep="\t",header=T,check.names=F,stringsAsFactors=F)
-  trait.show<-colnames(temp.moduleTraitCor)[!is.na(temp.moduleTraitCor[paste("ME",my.element.extract(MMList[i],splitchar="_",index=2),sep=""),])]
-  trait.pval<-temp.moduleTraitPvalue[paste("ME",my.element.extract(MMList[i],splitchar="_",index=2),sep=""),trait.show]
-  module.size<-nrow(Mmemb)
-  count_p<- (-log(trait.pval,base=2))*module.size/sum((-log(trait.pval,base=2)))
-  
-  #create the edges table
-  ModCol<-unname(sapply(MMList[i],my.element.extract,splitchar="Module_",index=2))
-  ModCol<-unname(sapply(ModCol,my.element.extract,splitchar="_",index=1))
-
-  node.from<-c(node.from,trait.show)
-  node.to<-c(node.to,rep(ModCol, times=length(trait.show)))
-  edge.val<-c(edge.val,count_p)
-  edge.type<-c(edge.type,rep("L1",length(count_p)))
-
-  # add the edges for the positive and negative genes
-  pos.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_posgenes.txt",sep=""))
-  if(file.exists(pos.filepath)==F){
-    cat("WARNING: ",pos.filepath," doesn't exist!\n")
-  }else{
-    temp<-read.table(pos.filepath,sep="\t",header=T,check.names=F)
-    pos.genenum<-nrow(temp)
-  }
-  
-  neg.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_neggenes.txt",sep=""))
-  if(file.exists(neg.filepath)==F){
-    cat("WARNING: ",neg.filepath," doesn't exist!\n",sep="")
-  }else{
-    temp<-read.table(neg.filepath,sep="\t",header=T,check.names=F)
-    neg.genenum<-nrow(temp)
-  }
-  
-  node.from<-c(node.from,ModCol)
-  node.to<-c(node.to, paste(ModCol,"(+)",sep=""))
-  edge.val<-c(edge.val,pos.genenum)
-  edge.type<-c(edge.type,"L2")
-
-  node.from<-c(node.from,ModCol)
-  node.to<-c(node.to, paste(ModCol,"(-)",sep=""))
-  edge.val<-c(edge.val,neg.genenum)
-  edge.type<-c(edge.type,"L2")
-  
-  # add the edges for the positive metacore results
-  metacore.pos.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_posgenes_metacore",sep=""),"Enrichment_analysis.xls")
-  if(file.exists(metacore.pos.filepath)){
-    metac<-read.xls(metacore.pos.filepath,sheet=1,check.names=F,stringsAsFactors = F)
-    colnames(metac)<-c("#","Maps","Total","pValue","MinFDR","ID_p-value","ID_FDR","ID_InData","ID_NetworkObjectsfromActiveData")
-    
-    if(nrow(metac)>=3){
-
-      metac<-metac[3:nrow(metac),2:9]
-      metac$ID_FDR<-as.numeric(metac$ID_FDR)
-
-      #take out fdr > 0.05
-      metac<-metac[metac$ID_FDR < 0.05,]
-      metac<-metac[order(metac$ID_FDR),]
-
-      #only show pathways with min.gene.num genes InData
-      metac<-metac[as.numeric(metac[,"ID_InData"])>=min.gene.num,]
-
-
-      # merge the pathways that are significant due to exactly the same genes
-      if(nrow(metac)>0){
-        temp.index<-split(1:nrow(metac),metac[,"ID_NetworkObjectsfromActiveData"])
-        my.metac<-numeric()
-        for(j in 1:length(temp.index)){
-          if(length(temp.index[[j]])==1){
-            my.metac<-rbind(my.metac,metac[temp.index[[j]],])
-          }else{
-            temp.matrix<-metac[temp.index[[j]],]  
-            temp.result<-temp.matrix[1,]
-            cat(ModCol," (+):\n",sep="",file=log.filepath,append=T)
-            cat(temp.matrix[,1],sep="\n",file=log.filepath,append=T)
-            cat("\n",file=log.filepath,append=T)
-            #temp.result[1,1]<-paste(temp.matrix[,1],collapse="\r")
-            temp.result[1,"ID_FDR"]<-min(temp.matrix[,"ID_FDR"])
-            temp.result[1,"ID_p-value"]<-min(temp.matrix[,"ID_p-value"])
-            my.metac<-rbind(my.metac,temp.result)
-          }
-        }
-        metac<-my.metac
-        metac<-metac[order(as.numeric(metac[,"MinFDR"]),decreasing=F),]
-        fdr.threshold.pos<-max(as.numeric(metac[1:min(top.pathway.num,nrow(metac)),"MinFDR"]))
-        metac<-metac[as.numeric(metac[,"MinFDR"])<=fdr.threshold.pos,]
-        #metac<-metac[1:min(top.pathway.num,nrow(metac)),]
-        
-        if(nrow(metac)>0){
-          node.from<-c(node.from,rep(paste(ModCol,"(+)",sep=""),nrow(metac)))
-          node.to<-c(node.to,metac[,1])
-          edge.val<-c(edge.val,metac[,7])
-          edge.type<-c(edge.type,rep("L3",nrow(metac)))
-        }
-      }
-    }
-
-    
-  }else{
-    cat("WARNING: ",metacore.pos.filepath," doesn't exist!",sep="")
-  }
-  
-  
-  # add the edges for the negative metacore results
-  metacore.neg.filepath<-file.path(metacore.dir,paste("Module_",ModCol,"_membership_gsig_neggenes_metacore",sep=""),"Enrichment_analysis.xls")
-  if(file.exists(metacore.neg.filepath)){
-    metac2<-read.xls(metacore.neg.filepath,sheet=1,check.names=F,stringsAsFactors = F)
-    colnames(metac2)<-c("#","Maps","Total","pValue","MinFDR","ID_p-value","ID_FDR","ID_InData","ID_NetworkObjectsfromActiveData")
-    
-    if(nrow(metac2)>=3){
-
-      metac2<-metac2[3:nrow(metac2),2:9]
-      metac2$ID_FDR<-as.numeric(metac2$ID_FDR)
-
-      #take out fdr > 0.05
-      metac2<-metac2[metac2$ID_FDR < 0.05,]
-      metac2<-metac2[order(metac2$ID_FDR),]
-
-      #only show pathways with min.gene.num genes InData
-      metac2<-metac2[as.numeric(metac2[,"ID_InData"])>=min.gene.num,]
-
-
-      # merge the pathways that are significant due to exactly the same genes
-      if(nrow(metac2)>0){
-        temp.index<-split(1:nrow(metac2),metac2[,"ID_NetworkObjectsfromActiveData"])
-        my.metac2<-numeric()
-        for(j in 1:length(temp.index)){
-          if(length(temp.index[[j]])==1){
-            my.metac2<-rbind(my.metac2,metac2[temp.index[[j]],])
-          }else{
-            temp.matrix<-metac2[temp.index[[j]],]  
-            temp.result<-temp.matrix[1,]
-            cat(ModCol," (-):\n",sep="",file=log.filepath,append=T)
-            cat(temp.matrix[,1],sep="\n",file=log.filepath,append=T)
-            cat("\n",file=log.filepath,append=T)
-            #temp.result[1,1]<-paste(temp.matrix[,1],collapse="\r")
-            temp.result[1,"ID_FDR"]<-min(temp.matrix[,"ID_FDR"])
-            temp.result[1,"ID_p-value"]<-min(temp.matrix[,"ID_p-value"])
-            my.metac2<-rbind(my.metac2,temp.result)
-          }
-        }
-        metac2<-my.metac2
-        metac2<-metac2[order(as.numeric(metac2[,"MinFDR"]),decreasing=F),]
-        fdr.threshold.neg<-max(as.numeric(metac2[1:min(top.pathway.num,nrow(metac2)),"MinFDR"]))
-        metac2<-metac2[as.numeric(metac2[,"MinFDR"])<=fdr.threshold.neg,]
-        #metac<-metac[1:min(top.pathway.num,nrow(metac)),]
-        
-        if(nrow(metac2)>0){
-          node.from<-c(node.from,rep(paste(ModCol,"(-)",sep=""),nrow(metac2)))
-          node.to<-c(node.to,metac2[,1])
-          edge.val<-c(edge.val,metac2[,7])
-          edge.type<-c(edge.type,rep("L3",nrow(metac2)))
-        }
-      }
-    }
-
-    
-  }else{
-    cat("WARNING: ",metacore.neg.filepath," doesn't exist!",sep="")
-  }
-}  
-  
-Alledges<-data.frame(node.from,node.to,edge.val,edge.type,stringsAsFactors=F)
-colnames(Alledges)<-c("source","target","value","edgetype")
-Alledges<-Alledges[complete.cases(Alledges), ]
-write.table(Alledges,file=file.path(output.dir,paste("Figure3b_unsupervised_sankey_top",top.pathway.num,"_mingenum",min.gene.num,"_fdr0.05.txt")),append=F,row.names=F,col.names=T,sep="\t",quote=F)
-
-cap<-paste("Figure 3b. Sankey plot showing the association of the chosen modules and the clinical traits and the function analysis results of the chosen modules for top.pathway.num=",top.pathway.num,", min.gene.num=",min.gene.num,sep="")
-
-```
-
-```{r figure3b_sankeyplot_unsupervised,eval=TRUE,cache=FALSE,fig.height=15,fig.width=15,fig.cap=cap}
-#nodes.temp2<-unique(Alledges[Alledges[,4]=="L2",1])
-#nodes.temp1<-unique(Alledges[Alledges[,4]=="L1",2])
-#keep.nodes<-intersect(nodes.temp1,nodes.temp2)
-
-#alledges<-Alledges[Alledges[,2]%in%keep.nodes | Alledges[,1]%in%keep.nodes ,1:3]
-alledges<-Alledges[,1:3]
-
-allnodes<-c(alledges$source,alledges$target)
-allnodes<-allnodes[!duplicated(allnodes)]
-
-edges2<-alledges
-
-for(i in 1:nrow(alledges)){
-  
-  edges2[i,1]<-as.integer(match(alledges[i,1],allnodes))-1
-  edges2[i,2]<-as.integer(match(alledges[i,2],allnodes))-1
-  
-}
-
-nodes2<-as.data.frame(allnodes,stringsAsFactors=F)
-colnames(nodes2)<-"name"
-
-edges2[,1]<-as.integer(edges2[,1])
-edges2[,2]<-as.integer(edges2[,2])
-edges2[,3]<-as.numeric(edges2[,3])
-
-temp.cat<-nodes2[,1]
-temp.cat[grep("\\(\\+\\)",temp.cat)]<-"positive"
-temp.cat[grep("\\(\\-\\)",temp.cat)]<-"negative"
-
-nodes2<-cbind(nodes2,temp.cat)
-colnames(nodes2)[2]<-"ngroup"
-
-# change the node names
-nodes2[nodes2[,1]=="BDFEV1",1]<-"FEV1"
-nodes2[nodes2[,1]=="FEV1PRED",1]<-"FEV1% predicted"
-nodes2[nodes2[,1]=="BDFVC",1]<-"FVC"
-nodes2[nodes2[,1]=="FVCPRED",1]<-"FVC% predicted"
-nodes2[nodes2[,1]=="BDDLCO",1]<-"DLCO"
-nodes2[nodes2[,1]=="PREDDLCO",1]<-"DLCO% predicted"
-nodes2[nodes2[,1]=="Med_Lymphadenopathy_yes/no",1]<-"Mediastinal Lymphadenopathy"
-nodes2[nodes2[,1]=="Hilar_Lymphadenopathy_yes/no",1]<-"Hilar Lymphadenopathy"
-nodes2[nodes2[,1]=="ALVBALD",1]<-"MACROPHAGE"
-nodes2[nodes2[,1]=="EOSBALD",1]<-"EOSINOPHIL"
-nodes2[nodes2[,1]=="LYMBALD",1]<-"LYMPHOCYTE"
-nodes2[nodes2[,1]=="NEUBALD",1]<-"NEUTROPHIL"
-nodes2[nodes2[,1]=="BALLCELL",1]<-"TOTAL CELL COUNTS"
-nodes2[nodes2[,1]=="TREATMENT",1]<-"Treatment (overall)"
-nodes2[nodes2[,1]=="TREATMENT_STAGEII-III",1]<-"Treatment (Stage II-III)"
-nodes2[nodes2[,1]=="TREATMENT_STAGEIV",1]<-"Treatment (Stage IV)"
-
-# remove nodes that do not have any associated pathways
-sn<-sankeyNetwork(Links = edges2, Nodes = nodes2, Source = "source", Target = "target", Value = "value",NodeID="name",fontSize=14,sinksRight = F,nodePadding =12,height=800,width=1200,NodeGroup="ngroup")
-
-sn <- onRender(
-  sn,
-  '
-function(el, x) {
-    d3.selectAll(".node text").attr("text-anchor", "begin").attr("x", 30);
-  }
-  '
-)
-sn
-
-# save the network into an eps file
-saveNetwork(network=sn,file = file.path(output.dir,paste("Figure3b_unsupervised_sankey_fdr0.05_top",top.pathway.num,"_mingenum",min.gene.num,".html",sep="")),selfcontained=F)
-
-```
-
-
-
-## Parallele Scripts Generation (not run)
-Here're the R codes that generate the scripts to run all the above steps.
-```{r 6_WGCNA_new.R,eval=FALSE,echo=TRUE,results='hide'}
-#---------------------------------------------------------------------------------------------------------------------------------------------------
-# /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_WGCNA_new.R
-####################
-# 6.3  for the set of potential outlier, evaluate the effect of these outliers on the WGCNA results
-
-# generate the file to show the CV quantiles.
-#dataload.filepath<-"/home/fas/kaminski/xy48/Rprogram/GRADS/BAL_final_20170724/WGCNA_PHGRPfiltering/6_0_DataLoad.R"
-#dataload.filepath<-"/home/fas/kaminski/xy48/Rprogram/GRADS/BAL_final_20170724/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
-dataload.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
-output.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
-
-if(file.exists(output.dir)==F){
-dir.create(output.dir)	
-}
-
-cv.threshold<-0
-
-source("/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/0_CleanDataLoad.R")
-output.dir<-file.path(output.dir,paste("CV",cv.threshold,"_compare",sep=""))
-
-if(file.exists(output.dir)==F){
-dir.create(output.dir)	
-}
-
-#=====================================================================================
-#
-#  Load in both the gene expression and the clinical data
-#  Filter the genes based on CV and match the gene expression and the clinical data
-#
-#=====================================================================================
-
-#clinic.filepath<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Data/SARC_combine_clinical_data20170814.txt"
-clinic.filepath<-"/home/yanxiting/Research/GRADS_SARC/Data/SARC_combine_clinical_data20170814.txt"
-clinic.matrix=read.table(clinic.filepath,header=T,sep="\t",check.names=F,stringsAsFactors=F,quote = "")
-rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
-clinic.matrix<-clinic.matrix[sample.matrix[,1],]
-
-##########for BAL samples
-# only keep genes expressed (fpkm>0.01 in >10% samples) across all samples
-bal.fpkm.matrix<-data.matrix[,substr(colnames(data.matrix),3,3)=="B"]
-bal.clinic.matrix<-clinic.matrix[substr(colnames(data.matrix),3,3)=="B",]
-
-bal.fpkm.matrix<-bal.fpkm.matrix[apply(bal.fpkm.matrix>0.01,1,sum)>ncol(bal.fpkm.matrix)*0.1,] # 30130 genes reduced to 20828 genes
-
-########## filter genes using SD>0 and genes using CV>cv.threshold################
-
-temp.sd<-apply(bal.fpkm.matrix,1,sd)
-bal.fpkm.matrix <- bal.fpkm.matrix[temp.sd>0,]
-
-temp.mean<-apply(bal.fpkm.matrix,1,mean)
-temp.sd<-apply(bal.fpkm.matrix,1,sd)
-temp.cv<-temp.sd/temp.mean
-
-my.data.matrix<-bal.fpkm.matrix[temp.cv>=cv.threshold,]
-
-
-# output the proportion, the number of genes remain and the quantiles of the CV into one file
-cat("percentile\t# of genes\tCV_quantile\n",file=file.path(output.dir,"/../bal_cv_quantiles.txt"),append=F)
-write.table(cbind(seq(from=0,to=1,by=0.01),length(temp.cv)*(1-seq(from=0,to=1,by=0.01)),quantile(temp.cv,prob=seq(from=0,to=1,by=0.01))),file=file.path(output.dir,"/../bal_cv_quantiles.txt"),sep="\t",append=T,quote=F,row.names=F,col.names=F)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-##########################
-# 6.3.0 load the data into R and save the workspace for further analysis
-#dataload.filepath<-"/home/fas/kaminski/xy48/Rprogram/GRADS/BAL_final_20170724/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
-dataload.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_0_DataLoad.R"
-# choose the following CV threshold using the bal_quantile.txt generated above
-#cv.threshold.vect<-c(0,0.2360,0.2888,0.3483,0.4384,0.5717,0.7019,0.8537,1.0571,1.4615)
-cv.threshold.vect<-0
-#output.dir<-"/home/fas/kaminski/xy48/scratch/GRADS/SARC_results/Results_summary/WGCNA_BAL/unadjusted_ALL_filtering"
-output.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
-
-script.dir<-file.path(output.dir,"scripts_dataload_outliercompare")
-if(file.exists(script.dir)==F){
-dir.create(script.dir)
-}
-
-jobsub.filepath<-file.path(script.dir,"jobsub.bat")
-if(file.exists(jobsub.filepath)){
-file.remove(jobsub.filepath)
-}
-file.create(jobsub.filepath)
-
-for(i in 1:length(cv.threshold.vect)){
-	
-cv.threshold<-cv.threshold.vect[i]
-script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
-#cmd.out<-paste("#BSUB -q kaminski -n 1 -M 8000 -R \"span[ptile=1] rusage[mem=8000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
-#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1","\n","#SBATCH --mem=16000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
-#cmd.out<-paste(cmd.out,"/usr/bin/R --vanilla<<EOF\n",sep="")
-cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
-cmd.out<-paste(cmd.out,"cv.threshold<-",cv.threshold,"\n",sep="")
-cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"source(\"",dataload.filepath,"\")\n",sep="")
-cmd.out<-paste(cmd.out,"EOF\n",sep="")
-cat(cmd.out,file=script.filepath,append=F)
-system(paste("chmod 700 ",script.filepath,sep=""))
-#cat("bsub < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
-cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
-
-}
-system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
-
-
-
-
-
-
-
-
-
-
-# 6.3.1 for each cv.threshold, generate the hclust tree for review by eyes to decide potential heights of cut on the tree
-r.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_1_sampletree.R"
-data.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
-#cv.threshold.vect<-c(0,0.2565,0.3148,0.3844,0.5058,0.6651,0.8375,1.0666,1.5233,3.4702)
-cv.threshold.vect<-0
-script.dir<-file.path(data.dir,"scripts_sampletree_outliercompare")
-if(file.exists(script.dir)==F){
-dir.create(script.dir)
-}
-
-jobsub.filepath<-file.path(script.dir,"jobsub.bat")
-if(file.exists(jobsub.filepath)){
-file.remove(jobsub.filepath)
-}
-file.create(jobsub.filepath)
-
-for(i in 1:length(cv.threshold.vect)){
-	
-cv.threshold<-cv.threshold.vect[i]
-script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
-#cmd.out<-paste("#BSUB -q kaminski -n 1 -M 8000 -R \"span[ptile=1] rusage[mem=8000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
-#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1","\n","#SBATCH --mem=16000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
-#cmd.out<-paste(cmd.out,"/usr/bin/R --vanilla<<EOF\n",sep="")
-cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
-cmd.out<-paste(cmd.out,"rdata.filepath<-\"",file.path(data.dir,paste("CV",cv.threshold,"_compare",sep=""),"input_data.RData"),"\"\n",sep="")
-cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
-cmd.out<-paste(cmd.out,"EOF\n",sep="")
-cat(cmd.out,file=script.filepath,append=F)
-system(paste("chmod 700 ",script.filepath,sep=""))
-cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
-
-}
-system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
-
-
-
-
-
-
-
-
-
-
-
-# 6.3.2 review the tree from 6.3.1 and generate a file (hclust_cut_heights_list.txt) containing the potential cut heights for each given cv.threshold
-#		the first height in hclust_cut_heights_list.txt has to be higher than the biggest height in sampletree_height_list.txt
-#		for each cv.threshold and each given cut height, generate the soft power picking figure to pick soft power
-r.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_2_sftpicking.R"
-data.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
-cv.threshold.vect<-0
-
-script.dir<-file.path(data.dir,"scripts_sftpicking_outliercompare")
-if(file.exists(script.dir)==F){
-dir.create(script.dir)
-}
-
-jobsub.filepath<-file.path(script.dir,"jobsub.bat")
-if(file.exists(jobsub.filepath)){
-file.remove(jobsub.filepath)
-}
-file.create(jobsub.filepath)
-
-for(i in 1:length(cv.threshold.vect)){
-cv.threshold<-cv.threshold.vect[i]
-
-output.dir<-file.path(data.dir,paste("CV",cv.threshold,"_compare",sep=""))
-rdata.filepath<-file.path(output.dir,"input_data.RData")
-cutheight.filepath<-file.path(output.dir,"hclust_cut_heights_list.txt")
-
-script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
-#cmd.out<-paste("#BSUB -q kaminski -n 10 -M 64000 -R \"span[ptile=10] rusage[mem=64000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
-#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=10","\n","#SBATCH --mem=64000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
-#cmd.out<-paste(cmd.out,"/usr/bin/R --vanilla<<EOF\n",sep="")
-cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
-cmd.out<-paste(cmd.out,"rdata.filepath<-\"",rdata.filepath,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"cutheight.filepath<-\"",cutheight.filepath,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
-cmd.out<-paste(cmd.out,"EOF\n",sep="")
-cat(cmd.out,file=script.filepath,append=F)
-system(paste("chmod 700 ",script.filepath,sep=""))
-cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
-
-}
-system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
-
-
-# 6.3.3 review the soft power picking figure and pick the soft power for final analysis to save it in the file sft_power_list.txt
-r.filepath<-"/home/yanxiting/Research/GRADS_SARC/Rprogram/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R"
-data.dir<-"/home/yanxiting/Research/GRADS_SARC/Results_summary_BAL_hg38/WGCNA_BAL/unadjusted_ALL_filtering"
-#cv.threshold.vect<-c(0,1,1.5,2,2.5,3,3.5,4)
-cv.threshold.vect<-0
-
-script.dir<-file.path(data.dir,"scripts_clustering_outliercompare")
-if(file.exists(script.dir)==F){
-dir.create(script.dir)
-}
-
-jobsub.filepath<-file.path(script.dir,"jobsub.bat")
-if(file.exists(jobsub.filepath)){
-file.remove(jobsub.filepath)
-}
-file.create(jobsub.filepath)
-
-for(i in 1:length(cv.threshold.vect)){
-cv.threshold<-cv.threshold.vect[i]
-
-output.dir<-file.path(data.dir,paste("CV",cv.threshold,"_compare",sep=""))
-rdata.filepath<-file.path(output.dir,"sft_picking.RData")
-sftpower.filepath<-file.path(output.dir,"sft_power_list.txt")
-
-script.filepath<-file.path(script.dir,paste("cv",cv.threshold,".sh",sep=""))
-#cmd.out<-paste("#BSUB -q kaminski -n 10 -M 64000 -R \"span[ptile=10] rusage[mem=64000]\" -J ",paste("cv",cv.threshold,sep="")," -o ",script.filepath,".o%J -e ",script.filepath,".e%J\n",sep="")
-#cmd.out<-paste("#!/bin/bash","\n","#SBATCH --partition=pi_kaminski","\n","#SBATCH --job-name=",paste("cv",cv.threshold,sep=""),"\n","#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=10","\n","#SBATCH --mem=64000","\n","#SBATCH --time=168:00:00","\n","#SBATCH --mail-type=NONE","\n","#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
-#cmd.out<-paste(cmd.out,"R --vanilla<<EOF\n",sep="")
-cmd.out<-"/usr/bin/R --vanilla<<EOF\n"
-cmd.out<-paste(cmd.out,"rdata.filepath<-\"",rdata.filepath,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"sftpower.filepath<-\"",sftpower.filepath,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
-cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
-cmd.out<-paste(cmd.out,"EOF\n",sep="")
-cat(cmd.out,file=script.filepath,append=F)
-system(paste("chmod 700 ",script.filepath,sep=""))
-cat("sbatch ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
-
-}
-system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
-```
-
-The hierarhical clustering tree of all the samples is shown in `r figure_nums_1(name="hclust_unadjusted_1",display="cite")`
-```{r fig.cap=figure_nums_1(name="hclust_unadjusted_1",caption="Hierarhical clustering tree of all the samples for the unadjusted data."),echo=TRUE,cache=FALSE,results='hide'}
-wgcna.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare"
-```
-`r figure_nums_1(name="hclust_unadjusted_1")`
-```{r}
-knitr::include_graphics(file.path(wgcna.dir,"hclust_tree_allsamples.jpg"))
-```
-We identified 7 different cutting heights on the hierarchical clustering tree including the height that does not remove any samples. These chosen cutting heights and their corresponding number of identified outliers and the list of outliers are shown in `r table_nums_1("wgcna_cutheights_table_1",display="cite")`. 
-```{r}
-#data.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/cutheight_2_sft.txt"
-data.filepath<-file.path(wgcna.dir,"cutheight_2_sft.txt")
-temp.matrix<-read.table(data.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=FALSE)
-for(i in 1:nrow(temp.matrix)){
-  if(i==1){
-    next
-  }
-  temp.names<-temp.matrix[i-1,3]
-
-  if(temp.names!=""){
-    temp.names<-paste(temp.names,temp.matrix[i,3],sep=";")
-  }else{
-    temp.names<-temp.matrix[i,3]
-  }
-  temp.matrix[i,3]<-temp.names
-}
-
-temp.matrix[,2]<-cumsum(temp.matrix[,2])
-
-kable(temp.matrix,digits = 4,row.names=FALSE,caption=table_nums_1(name="wgcna_cutheights_table_1",caption="Table of the chosen cutting heights on the hierarchical clustering tree for the unadjusted data and their corresponding number of outliers and the list of outliers.")) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive"), full_width=FALSE,position="left") 
-#write.table(temp.matrix,sep="\t",row.names=F,col.names=T,quote=F)
-```
-
-The WGCNA results of these 7 chosen cutting heights are compared and shown in `r figure_nums_1("wgcna_compare_unadjusted",display="cite")`.
-
-```{r fig.cap=figure_nums_1(name="wgcna_compare_unadjusted",caption="Heatmap comparing the clustering results of the 7 chosen cutting heights for the unadjusted data."),echo=FALSE,cache=FALSE,results='hide'}
-```
-`r figure_nums_1(name="wgcna_compare_unadjusted")`
-```{r}
-knitr::include_graphics(file.path(wgcna.dir,"dendrogram_outliers_compare.jpg"))
-```
-
-Based on the comparison in `r figure_nums_1("wgcna_compare_unadjusted",display="cite")`, we decided to use the cutting height=21342 which defined 8 outliers for the WGCNA analysis. The identified gene modules and their correlation with the given clinical trais are shown in .
-
-```{r fig.cap=figure_nums_1(name="wgcna_unadjusted_heatmap_1",caption="Heatmap showing the correlation between the identified gene modules and the clinical traits for the unadjusted data."),echo=FALSE,cache=FALSE,results='hide'}
-```
-`r figure_nums_1(name="wgcna_unadjusted_heatmap_1")`
-```{r}
-knitr::include_graphics(file.path(wgcna.dir,"heatmap_trait_correlation_modules_outliers_withratio_7_pvaluesig.jpg"))
-```
-
-```{r results='hide'}
-data.filepath<-file.path(wgcna.dir,"wgcna_cutheights.RData")
-load(data.filepath)
-net<-net.list[[7]]
-```
-
-The WGCNA analysis identified `r length(unique(net$colors))` gene modules and the size of these modules ranges from `r min(table(net$colors))` to `r max(table(net$colors))`. The results in `r figure_nums_1("wgcna_unadjusted_heatmap_1",display="cite")` provided the following observations:
-
-1. The demographics variables(age, gender and race) are correlated with very limited number of gene modules. There is only one gene module (**MEbrown4**) that is strongly correlated with gender and this module is also correated with the absolute BDFEV1, BDFVC and BDDLCO. However, this gene module is not correated with the FEV1PRED, FVCPRED and PREDDLCO which are the predicted lung function values in percentage. This is consistent with the fact that the predicted lung function in percentage were calculated by removing effects from age, gender and race. 
-2. The WGCNA has identified many gene modules that are correlated with many important clinical traits for Sarcoidosis including the lung function and the CT scan variables.
-    + Turquoise module
-    + Brown module
-    + Brown4 module
-    + Grey60 module
-    + Violet module
-3. The identified gene modules above are in general also correlated with the cell differentials. This motivates us to apply WGCNA analysis to the data adjusted for the cell differentials.
-
-
-
-
-
-# Hierarchical clustering
