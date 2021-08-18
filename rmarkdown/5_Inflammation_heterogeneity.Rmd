@@ -84,9 +84,11 @@ output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_
 
 In this note, we use WGCNA to identify gene modules within the inflammation genes (IFG related genes). Then we cluster patients based on these gene modules and try to identify clinical traits associated with the clusters. This will define new phenotype based on inflammatory biomarkers (CRP).
 
-# WGCNA on PBMC baseline adjusted data
+# Interferon gamma signaling genes
+We first did the analysis with inteferron gamma signaling genes downloaded from metacore.
+## WGCNA on PBMC baseline adjusted data
 
-## Data Loading (gene expression)
+### Data Loading (gene expression)
 
 Load in and match the clinical data,fpkm matrix, and the sample mapping matrix.
 ```{r 0_CleanDataLoad.R,eval=FALSE,echo=TRUE,results='hide'}
@@ -122,7 +124,7 @@ sample.matrix<-sample.matrix[colnames(data.matrix),]
 
 ```
 
-## Data Loading (clinical data and gene filtering)
+### Data Loading (clinical data and gene filtering)
 Load in clinical matrix and extract data for the variables needed to correlate with the gene modules. Some of the clinical featuers were also re-coded.
 ```{r 6_0_DataLoad.R,eval=FALSE,echo=TRUE,results='hide'}
 #-------------------------------------------------------------------------------------------------# /Rprogram/GRADS_PBMC/WGCNA/6_0_DataLoad.R
@@ -313,7 +315,7 @@ datTraits[datTraits<0]<-NA
 save.image(file.path(output.dir,"input_data.RData"))
 ```
 
-## Outlier Removal
+### Outlier Removal
 Generate the hierarhical clustering tree using the genes to identify potential outliers.
 ```{r 6_1_sampletree.R,eval=FALSE,echo=TRUE,results='hide'}
 #----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -342,10 +344,10 @@ output.filepath<-file.path(output.dir,"sampletree_height_list.txt")
 cat(sampleTree$height,sep="\n",file=output.filepath,append=F)
 ```
 
-## Decide Cutting Height
+### Decide Cutting Height
 We need to go over the sampletree_height_list.txt and the hcluste_tree_allsamples.eps to decide where to cut on the hierarchical clustering tree. The first number in the files should be a number larger than the largest number in sampletree_height_list.txt to make sure we also run the program without removing any samples. Then each number in the file should be slightly smaller than the actual number in sampletree_height_list.txt to make sure we cut underneath the branch. 
 
-## Soft Power Picking
+### Soft Power Picking
 We need to generate the hclust_cut_heights.list.txt to provide the heights at which we would like to cut the hierarchical clustering tree. Name of this file cannot be changed and it has to be saved under the same folder where all WGCNA results are saved.
 ```{r 6_2_sftpicking.R,eval=FALSE,echo=TRUE,results='hide'}
 #----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -441,7 +443,7 @@ save.image(file.path(output.dir,"sft_picking.RData"))
 
 We need to review the plots in sft_picking.pdf and generate a text file with each line describing the softpower we want to set for each cut height we picked before. This text file will be saved as sft_power_list.txt. The numbers will be in the same order as those plots in the sft_picking.pdf. 
 
-## Clustering
+### Clustering
 ```{r 6_3_clustering.R,eval=TRUE,echo=TRUE,results='hide'}
 #---------------------------------------------------------------------------------------------------------------------------------------------------
 # /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R
@@ -809,10 +811,10 @@ dev.off()
 save.image(file.path(output.dir,"wgcna_cutheights.RData"))
 ```
 
-## Results visualization
+### Results visualization
 We generate heatmap of the correlation between clinical traits and gene modules with the gene module size shown.
 
-### Define lymph_nodule_phenotype
+#### Define lymph_nodule_phenotype
 First, we generate the recoded lymphadenopathy and micronodule phenotype into the clinical traits.
 ```{r eval=FALSE}
 # load in the clinical data
@@ -867,7 +869,7 @@ output.filepath<-file.path("/home/yanxiting/driver_Grace/scratch/GRADS/SARC_resu
 write.xlsx(cmd.out,file=output.filepath,sheetName="Sheet1",col.names=T,row.names=F,append=F)
 ```
 
-### Data loading
+#### Data loading
 Second, we load in the WGCNA results and the newly defined phenotype based on lymphadenopathy and micronodule.
 ```{r}
 # These codes load in the WGCNA results of the unadjusted data to extract some of the information
@@ -888,7 +890,7 @@ datTraits<-rbind(datTraits,temp.pheno)
 rownames(datTraits)[nrow(datTraits)]<-"nodule_lymph_pheno"
 ```
 
-### Heatmap of correlation
+#### Heatmap of correlation
 Third, we redraw the heatmap of the correlation between clinical traits and gene modules with the module size in it.
 ```{r fig.width=10,fig.height=5,cache=FALSE,fig.cap="Heatmap showing the corrleation between the gene modules identified by WGCNA with the clinical traits with gene module size."}
 output.subdir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/figures"
@@ -1060,7 +1062,7 @@ naColor="white")
 
 ```
 
-### Heatmap of gene expression and gene modules
+#### Heatmap of gene expression and gene modules
 
 We first generate a matrix of the clinical traits including the original data, updated data, CRP and CT scan data.
 
@@ -1301,9 +1303,9 @@ We observed:
 
 Based on our observations, we may simply remove genes with small variation or in the grey module for the patient clustering analysis.
 
-# Patient clustering
+## Patient clustering
 
-## Remove grey module
+### Remove grey module
 We remove genes in the grey module and conduct patient clustering using K-means clustering based on the remaining genes.
 
 * Load in gene expression data and the merged clinical matrix.
@@ -1409,7 +1411,7 @@ ggsave(file=output.filepath,width = 200, height =  200, units = "mm", g)
 
 ```
 
-* Correlate the clsutering results with clinical data.
+#### Comparing clinical traits across all clusters
 
 ```{r}
 # load in the clustering results
@@ -1526,7 +1528,7 @@ saveRDS(x,file=output.filepath,refhook = NULL)
 
 ```
 
-### Comparing two extrems clusters
+#### Comparing clinical trait between two extreme clusters
 We chose cluster 5 and 6 because in heatmap_kmeans_allcomparison.pdf, cluster 5 and 6 have the most distinguished expression patterns. We directly compare the clinical traits between these two groups of patients to see what clinical traits are associated.
 ```{r}
 # load in the clustering results
@@ -1645,7 +1647,7 @@ saveRDS(x,file=output.filepath,refhook = NULL)
 
 ```
 
-## Remove genes with low variation
+## Remove genes with low variation (not run)
 ```{r remove_lowvar_genes,fig.width4,fig.height=4}
 # load in the clinic data
 clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
