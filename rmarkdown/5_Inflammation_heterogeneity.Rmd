@@ -1502,6 +1502,145 @@ my_summary<-setNames(my_summary,paste(names(my_summary),": P-value=",formatC(pva
 whole_table<-summary_table(my.data,my_summary,by="kmeans.clustering")
 whole_table
 
+output.filepath<-file.path(output.dir,"kmeans_IFNgamma","IFNgamma_WGCNA_kmeans_clustering_summarytable.rds")
+saveRDS(whole_table,file=output.filepath,refhook = NULL)
+
+my.data.2<-my.data[,feature.names]
+my.data.2<-cbind(my.data.2,my.data$kmeans.clustering)
+colnames(my.data.2)[ncol(my.data.2)]<-"kmeans.clustering"
+my.data.2[my.data.2<0]<-NA
+
+for(j in 1:length(feature.names)){
+  if(feature.types[j]=="cat"){
+    my.data.2[,j]<-as.factor(my.data.2[,j])
+  }
+}
+my.data.2[,ncol(my.data.2)]<-as.factor(my.data.2[,ncol(my.data.2)])
+x<-summary_table(my.data.2,qsummary(my.data.2),by="kmeans.clustering")
+x
+
+output.filepath<-file.path(output.dir,"kmeans_IFNgamma","IFNgamma_WGCNA_kmeans_clustering_summarytable2.rds")
+saveRDS(x,file=output.filepath,refhook = NULL)
+
+```
+
+### Comparing two extrems clusters
+We chose cluster 5 and 6 because in heatmap_kmeans_allcomparison.pdf, cluster 5 and 6 have the most distinguished expression patterns. We directly compare the clinical traits between these two groups of patients to see what clinical traits are associated.
+```{r}
+# load in the clustering results
+kmeans.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/kmeans_IFNgamma","kmeans_k6_patient_clustering.txt")
+kmeans.k<-6
+kmeans.clustering<-read.table(kmeans.filepath,sep="\t",header=T,check.names=F)
+temp<-kmeans.clustering[,2]
+names(temp)<-kmeans.clustering[,1]
+kmeans.clustering<-temp
+kmeans.clustering<-kmeans.clustering[rownames(clinic.matrix)]
+
+# correlate the clustering results with clinical traits using 
+feature.names<-c("GENDER","RACE","AGE","ethor","wbc","cd4","cal","d25","d125","crp","p_lymph","p_mono","p_neut","p_eos","p_baso","BDFVC","POSTFVC","FVCPRED","BDFEV1","POSTFEV1","FEV1PRED","BDDLCO","PREDDLCO","SCADDING","PHENGRP","smoke","steroid_atv1","dmard_atv1","nodule_lymph_pheno")
+feature.types<-c("cat","cat","con","cat",rep("con",19),"cat","cat","cat","cat","cat","cat")
+
+my.data<-cbind(clinic.matrix,kmeans.clustering)
+
+my.data<-my.data[my.data$kmeans.clustering%in%c(5,6),]
+my.clinic.matrix<-clinic.matrix[my.data$GRADSID,]
+orig_opt <- options()$qwraps2_markup
+options(qwraps2_markup = "markdown")
+
+my_summary<-list( "Gender"=list("female"= ~ qwraps2::n_perc0(GENDER==0,na_rm = T),"male"=~ qwraps2::n_perc0(GENDER==1,na_rm = T)),
+                 "Race"=list("White"= ~ qwraps2::n_perc0(RACE==0,na_rm = T),
+                             "Black"=~ qwraps2::n_perc0(RACE==1,na_rm = T),
+                             "Other"=~ qwraps2::n_perc0(RACE>1,na_rm = T)),
+                 "Age"=list("mean (sd)"= ~ qwraps2::mean_sd(AGE,na_rm = T)),
+                 "ethor"=list("yes"= ~ qwraps2::n_perc0(ethor==1,na_rm = T),
+                              "no"=~ qwraps2::n_perc0(ethor==0,na_rm = T)),
+                 "WBC"=list("mean (sd)"= ~ qwraps2::mean_sd(wbc,na_rm = T)),
+                 "CD4"=list("mean (sd)"= ~ qwraps2::mean_sd(cd4,na_rm = T)),
+                 "CALCIUM"=list("mean (sd)"= ~ qwraps2::mean_sd(cal,na_rm = T)),
+                 "D25"=list("mean (sd)"= ~ qwraps2::mean_sd(d25,na_rm = T)),
+                 "D125"=list("mean (sd)"= ~ qwraps2::mean_sd(d125,na_rm = T)),
+                 "CRP"=list("mean (sd)"= ~ qwraps2::mean_sd(crp,na_rm = T)),
+                 "Lymphocytes %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_lymph,na_rm = T)),
+                 "Monocytes %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_mono,na_rm = T)),
+                 "Neutrophils %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_neut,na_rm = T)),
+                 "Eosinophils %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_eos,na_rm = T)),
+                 "Basophils %"=list("mean (sd)"= ~ qwraps2::mean_sd(p_baso,na_rm = T)),
+                 "FVC (pre)"=list("mean (sd)"= ~ qwraps2::mean_sd(BDFVC,na_rm = T)),
+                 "FVC (post)"=list("mean (sd)"= ~ qwraps2::mean_sd(POSTFVC,na_rm = T)),
+                 "FVC %"=list("mean (sd)"= ~ qwraps2::mean_sd(FVCPRED,na_rm = T)),
+                 "FEV1 (pre)"=list("mean (sd)"= ~ qwraps2::mean_sd(BDFEV1,na_rm = T)),
+                 "FEV1 (post)"=list("mean (sd)"= ~ qwraps2::mean_sd(POSTFEV1,na_rm = T)),
+                 "FEV1 %"=list("mean (sd)"= ~ qwraps2::mean_sd(FEV1PRED,na_rm = T)),
+                 "DLCO (pre)"=list("mean (sd)"= ~ qwraps2::mean_sd(BDDLCO,na_rm = T)),
+                 "DLCO %"=list("mean (sd)"= ~ qwraps2::mean_sd(PREDDLCO,na_rm = T)),
+                 "Scadding Stage"=list("0"= ~ qwraps2::n_perc0(SCADDING=="0",na_rm = T),
+                                       "I"=~ qwraps2::n_perc0(SCADDING=="I",na_rm = T),
+                                       "II"= ~ qwraps2::n_perc0(SCADDING=="II",na_rm = T),
+                                       "III"= ~ qwraps2::n_perc0(SCADDING=="III",na_rm = T),
+                                       "IV"= ~ qwraps2::n_perc0(SCADDING=="IV",na_rm = T)),
+                 "Phenotypic Group"=list("Multi-organ"= ~ qwraps2::n_perc0(PHENGRP=="Multi-organ",na_rm = T),
+                                "Remitting, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Remitting, untreated",na_rm = T),
+                                "Cardiac defining therapy"= ~ qwraps2::n_perc0(PHENGRP=="Cardiac defining therapy",na_rm = T),
+                      "Acute SARC, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Acute Sarcoidosis, untreated",na_rm = T),
+                      "Stage I, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Non-acute, Stage I, untreated",na_rm = T),
+                      "Stage II-III, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Stage II-III, untreated",na_rm = T),
+                      "Stage IV, untreated"= ~ qwraps2::n_perc0(PHENGRP=="Stage IV, untreated",na_rm = T),
+                      "Stage II-III, treated"= ~ qwraps2::n_perc0(PHENGRP=="Stage II-III, treated",na_rm = T),
+                      "Stage IV, treated"= ~ qwraps2::n_perc0(PHENGRP=="Stage IV, treated",na_rm = T)),
+                 "Smoking"=list("yes"= ~ qwraps2::n_perc0(smoke==1,na_rm = T),"no"=~ qwraps2::n_perc0(smoke==0,na_rm = T)),
+                 "Steroid usage"=list("yes"= ~ qwraps2::n_perc0(steroid_atv1==1,na_rm = T),"no"=~ qwraps2::n_perc0(steroid_atv1==0,na_rm = T)),
+                 "Dmard"=list("yes"= ~ qwraps2::n_perc0(dmard_atv1==1,na_rm = T),"no"=~ qwraps2::n_perc0(dmard_atv1==0,na_rm = T)),
+                 "Lymph Nodule Pheno"=list("none"= ~ qwraps2::n_perc0(nodule_lymph_pheno=="none",na_rm = T),
+                "lymph only"=~ qwraps2::n_perc0(nodule_lymph_pheno=="lymph",na_rm = T),
+                "both"= ~ qwraps2::n_perc0(nodule_lymph_pheno=="both",na_rm = T),
+                "micronodule only"= ~ qwraps2::n_perc0(nodule_lymph_pheno=="micronodule",na_rm = T))
+                 )
+
+#whole_table<-summary_table(my.data,my_summary,by="kmeans.clustering")
+#whole_table
+
+# add p value into the summary table
+pvalue.vect<-numeric()
+for(i in 1:length(feature.names)){
+  if(feature.types[i]=="con"){
+    pvalue.vect<-c(pvalue.vect,kruskal.test(my.clinic.matrix[,feature.names[i]] ~ as.factor(my.data$kmeans.clustering))$p.value)
+  }else{
+    temp.vect<-my.clinic.matrix[,feature.names[i]]
+    if(feature.names[i]=="RACE"){
+      temp.vect[temp.vect>1]<-NA
+    }
+    y<-my.data$kmeans.clustering
+    y<-y[!is.na(temp.vect)]
+    temp.vect<-temp.vect[!is.na(temp.vect)]
+    pvalue.vect<-c(pvalue.vect,chisq.test(x=as.factor(temp.vect),y=as.factor(y))$p.value)
+  }
+}
+
+my_summary<-setNames(my_summary,paste(names(my_summary),": P-value=",formatC(pvalue.vect,digits=4),sep=""))
+
+whole_table<-summary_table(my.data,my_summary,by="kmeans.clustering")
+whole_table
+
+output.filepath<-file.path(output.dir,"kmeans_IFNgamma","IFNgamma_WGCNA_kmeans_clustering_summarytable_C5&6.rds")
+saveRDS(whole_table,file=output.filepath,refhook = NULL)
+
+my.data.2<-my.data[,feature.names]
+my.data.2<-cbind(my.data.2,my.data$kmeans.clustering)
+colnames(my.data.2)[ncol(my.data.2)]<-"kmeans.clustering"
+my.data.2[my.data.2<0]<-NA
+
+for(j in 1:length(feature.names)){
+  if(feature.types[j]=="cat"){
+    my.data.2[,j]<-as.factor(my.data.2[,j])
+  }
+}
+my.data.2[,ncol(my.data.2)]<-as.factor(my.data.2[,ncol(my.data.2)])
+x<-summary_table(my.data.2,qsummary(my.data.2),by="kmeans.clustering")
+x
+
+output.filepath<-file.path(output.dir,"kmeans_IFNgamma","IFNgamma_WGCNA_kmeans_clustering_summarytable2_C5&6.rds")
+saveRDS(x,file=output.filepath,refhook = NULL)
+
 ```
 
 ## Remove genes with low variation
