@@ -86,6 +86,7 @@ In this note, we use WGCNA to identify gene modules within the inflammation gene
 
 # Interferon gamma signaling genes
 We first did the analysis with inteferron gamma signaling genes downloaded from metacore.
+
 ## WGCNA on PBMC baseline adjusted data
 
 ### Data Loading (gene expression)
