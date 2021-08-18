@@ -85,9 +85,12 @@ output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_
 In this note, we use WGCNA to identify gene modules within the inflammation genes (IFG related genes). Then we cluster patients based on these gene modules and try to identify clinical traits associated with the clusters. This will define new phenotype based on inflammatory biomarkers (CRP).
 
 # Interferon gamma signaling genes
+
 We first did the analysis with inteferron gamma signaling genes downloaded from metacore.
 
 ## WGCNA on PBMC baseline adjusted data
+
+We applied WGCNA to the expression levels of IFNgamma signaling genes to identify clusters of highly correlated genes.
 
 ### Data Loading (gene expression)
 
