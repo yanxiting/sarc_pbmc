@@ -1651,6 +1651,33 @@ saveRDS(x,file=output.filepath,refhook = NULL)
 
 ```
 
+
+#### DEGs between cluster 5 and 6
+
+We decided to use the kmeans clustering results when k=6. Cluster 5 and 6 were found to be the two extreme clusters. In this section, we identify DEGs between cluster 5 and 6 and conduct a functional analysis of the identified DEGs to shed light on the meaning of cluster 5 and 6.
+
+```{r}
+# These codes should be saved in /home/xy48/Rprogram/GRADS_PBMC/WGCNA/0_CleanDataLoad.R
+home.dir<-"/home/yanxiting/driver_Grace"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+kmeans.clustering.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/kmeans_IFNgamma/kmeans_k6_patient_clustering.txt")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+
+# Load in the merged clinical data matrix
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS")
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+# load in the kmeans clustering results
+
+
+```
+
 ## Remove genes with low variation (not run)
 ```{r remove_lowvar_genes,fig.width4,fig.height=4}
 # load in the clinic data
