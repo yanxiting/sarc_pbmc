@@ -114,6 +114,15 @@ clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_
 clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
 clinic.matrix<-clinic.matrix[sample.matrix[,1],]
 
+# load in the gli equation PFTs
+gli.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/nhanes_gli_adjustedpft.csv")
+gli.data<-read.csv(gli.filepath,check.names = F,stringsAsFactors = F)
+rownames(gli.data)<-gli.data[,1]
+gli.data<-gli.data[rownames(clinic.matrix),]
+
+# merge the gli data into the clinic.matrix
+clinic.matrix<-cbind(clinic.matrix,gli.data[,4:ncol(gli.data)])
+
 ##########for BAL samples
 # only keep genes expressed (fpkm>0.01 in >10% samples) across all samples
 bal.fpkm.matrix<-data.matrix
@@ -144,8 +153,16 @@ datTraits<-bal.clinic.matrix[,c("AGE",
                                 "RACE",
                                 "BDFVC",
                                 "FVCPRED",
+                                "ppfvcpreNhanes",
+                                "ppfvcpostNhanes",
+                                "ppfvcpreGli",
+                                "ppfvcpostGli",
                                 "BDFEV1",
                                 "FEV1PRED",
+                                "ppfevpreNhanes",
+                                "ppfevpostNhanes",
+                                "ppfevpreGli",
+                                "ppfevpostGli",
                                 "BDDLCO",
                                 "PREDDLCO",
                                 "ethor",
@@ -247,10 +264,18 @@ datTraits<-datTraits[c(
 "RACE",
 "BDFVC",
 "FVCPRED",
+"ppfvcpreNhanes",
+"ppfvcpostNhanes",
+"ppfvcpreGli",
+"ppfvcpostGli",
 "BDFEV1",
 "FEV1PRED",
+"ppfevpreNhanes",
+"ppfevpostNhanes",
+"ppfevpreGli",
+"ppfevpostGli",
 "BDDLCO",
-"PREDDLCO", # add the gli 
+"PREDDLCO", # add the gli
 "ethor",
 "num_organ",
 "wbc",
