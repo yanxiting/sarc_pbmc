@@ -250,12 +250,12 @@ datTraits<-datTraits[c(
 "BDFEV1",
 "FEV1PRED",
 "BDDLCO",
-"PREDDLCO",
+"PREDDLCO", # add the gli 
 "ethor",
 "num_organ",
 "wbc",
 "cd4",
-"cd8",
+#"cd8", # probably not important
 "cal",
 "d25",
 "d125",
@@ -466,15 +466,15 @@ dissTOM = 1-TOMsimilarityFromExpr(my.datExpr, power = power.selected)
 plotTOM = dissTOM^7
 diag(plotTOM) = NA
 
-output.filepath<-file.path(output.dir,paste("heatmap_module_outliers_",i,".eps",sep=""))
-postscript(output.filepath,width=15,height=15,paper="special")
+#output.filepath<-file.path(output.dir,paste("heatmap_module_outliers_",i,".eps",sep=""))
+#postscript(output.filepath,width=15,height=15,paper="special")
 #sizeGrWindow(15,15)
-temp.error<-try(TOMplot(plotTOM[net$goodGenes,net$goodGenes], net$dendrograms[[1]], labels2colors(net$colors)[net$goodGenes],
-main = paste("Network heatmap plot",sep="")))
+#temp.error<-try(TOMplot(plotTOM[net$goodGenes,net$goodGenes], net$dendrograms[[1]], labels2colors(net$colors)[net$goodGenes],
+#main = paste("Network heatmap plot",sep="")))
 
 #output.filepath<-file.path(output.dir,paste("heatmap_modules_CV_no_log2_without_outlier",cv.threshold,".jpg",sep=""))
 #savePlot(output.filepath,type="jpeg")
-dev.off()
+#dev.off()
 
 
 #--------------------------------------
