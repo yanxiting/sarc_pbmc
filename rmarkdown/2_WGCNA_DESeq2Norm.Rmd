@@ -481,7 +481,7 @@ reassignThreshold = 0, mergeCutHeight = 0.25,
 numericLabels = TRUE, pamRespectsDendro = FALSE,
 saveTOMs = FALSE,
 #saveTOMFileBase = paste("CV",cv.threshold,"outlier",i,sep=""),
-verbose = 3,nThreads=4)
+verbose = 3,nThreads=15)
 net.list[[i]]<-net
 
 
