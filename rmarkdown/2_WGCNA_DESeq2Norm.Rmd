@@ -806,7 +806,7 @@ save.image(file.path(output.dir,"wgcna_cutheights.RData"))
 ```
 
 
-Here's the code block that has everything together, which can be run on a workstation.
+Here's the code block that generate the script files to run these jobs on HPC in parallel.
 ```{r 6_WGCNA_new.R,eval=FALSE,echo=TRUE,results='hide'}
 #---------------------------------------------------------------------------------------------------------------------------------------------------
 # /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_WGCNA_new.R
@@ -1062,13 +1062,14 @@ system(paste("chmod 700 ",jobsub.filepath,"\n",sep=""))
 
 The hierarhical clustering tree of all the samples is shown in `r figure_nums_1(name="hclust_unadjusted_1",display="cite")`
 ```{r fig.cap=figure_nums_1(name="hclust_unadjusted_1",caption="Hierarhical clustering tree of all the samples for the unadjusted data."),echo=TRUE,cache=FALSE,results='hide'}
-wgcna.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA/WGCNA_DESeq2Norm_original"
+#wgcna.dir<-output.dir
+wgcna.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA/WGCNA_DESeq2Norm_original")
 ```
 `r figure_nums_1(name="hclust_unadjusted_1")`
 ```{r}
 knitr::include_graphics(file.path(wgcna.dir,"hclust_tree_allsamples.jpg"))
 ```
-We identified 7 different cutting heights on the hierarchical clustering tree including the height that does not remove any samples. These chosen cutting heights and their corresponding number of identified outliers and the list of outliers are shown in `r table_nums_1("wgcna_cutheights_table_1",display="cite")`. 
+We identified 16 different cutting heights on the hierarchical clustering tree including the height that does not remove any samples. These chosen cutting heights and their corresponding number of identified outliers and the list of outliers are shown in `r table_nums_1("wgcna_cutheights_table_1",display="cite")`. 
 ```{r}
 #data.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/cutheight_2_sft.txt"
 data.filepath<-file.path(wgcna.dir,"cutheight_2_sft.txt")
