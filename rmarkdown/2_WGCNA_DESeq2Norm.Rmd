@@ -1069,7 +1069,7 @@ wgcna.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_h
 ```{r}
 knitr::include_graphics(file.path(wgcna.dir,"hclust_tree_allsamples.jpg"))
 ```
-We identified 16 different cutting heights on the hierarchical clustering tree including the height that does not remove any samples. These chosen cutting heights and their corresponding number of identified outliers and the list of outliers are shown in `r table_nums_1("wgcna_cutheights_table_1",display="cite")`. 
+We identified 15 different cutting heights on the hierarchical clustering tree including the height that does not remove any samples. These chosen cutting heights and their corresponding number of identified outliers and the list of outliers are shown in `r table_nums_1("wgcna_cutheights_table_1",display="cite")`. 
 ```{r}
 #data.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/cutheight_2_sft.txt"
 data.filepath<-file.path(wgcna.dir,"cutheight_2_sft.txt")
@@ -1103,13 +1103,111 @@ The WGCNA results of these 7 chosen cutting heights are compared and shown in `r
 knitr::include_graphics(file.path(wgcna.dir,"dendrogram_outliers_compare.jpg"))
 ```
 
-Based on the comparison in `r figure_nums_1("wgcna_compare_unadjusted",display="cite")`, we decided to use the cutting height=21342 which defined 8 outliers for the WGCNA analysis. The identified gene modules and their correlation with the given clinical trais are shown in .
+Based on the comparison in `r figure_nums_1("wgcna_compare_unadjusted",display="cite")`, we decided to use the cutting height= which defined 15 outliers for the WGCNA analysis. The identified gene modules and their correlation with the given clinical trais are shown in .
+
+
+We had to redraw the heatmap of correlation between clinical traits and modules.
+```{r fig.width=11,fig.height=16}
+#---------------------------------------------------------------------------------------------------------------------------------------------------
+# /Users/yanxiting/MyVolumes/GRACE/Rprogram/GRADS/BAL_final_hg38_20180726/WGCNA_unadjusted_ALL_filtering/6_3_clustering.R
+library(WGCNA)
+enableWGCNAThreads(nThreads = 15)
+library(gplots)
+
+
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/WGCNA/WGCNA_DESeq2Norm_original")
+rdata.filepath<-file.path(output.dir,"wgcna_cutheights.RData")
+sftpower.filepath<-file.path(output.dir,"sft_power_list.txt")
+load(rdata.filepath)
+
+my.cor.dist<-function(x,method.name="spearman"){
+# calculate the correlation between rows in x and return the correlation matrix as a distance matrix
+y<-cor(t(x),method=method.name)
+y[is.na(y)]<- -1.5
+return(as.dist(1-y))
+}
+
+
+# for each element in outlier.list, pick power and put them in power.vect below for further analysis
+power.vect<-scan(sftpower.filepath)
+
+i<-2
+
+gc()
+cat("i=",i,"\n",sep="")
+my.datExpr = datExpr[setdiff(rownames(datExpr),unlist(outlier.list[1:i])), ]
+
+#rename the columns (remove all after _ in sample name)
+SarcaleSamples = rownames(my.datExpr)
+sampleRows =match(SarcaleSamples,rownames(sample.matrix));
+sample.matrix.new=sample.matrix[sampleRows,]
+traitRows = match(sample.matrix.new[,1],colnames(datTraits));
+my.datTraits = datTraits[,traitRows];
+
+nGenes = ncol(my.datExpr)
+nSamples = nrow(my.datExpr)
+
+# select the power based on the plot above
+power.selected<-power.vect[i]
+net = net.list[[i]]
+
+#----------------------------------------
+# calculate the correltion between the eigen genes of the modules to see if we need to change the mergeCutHeight
+MEList.test<-moduleEigengenes(my.datExpr,colors=mergedColors)
+MEs.test<-MEList.test$eigengenes
+MEDiss.test<-1-cor(MEs.test)
+METree.test=hclust(as.dist(MEDiss.test),method="average")
+
+#-----------------------------------------------
+# plot the correlation between the modules with the clinical traits
+nGenes = ncol(my.datExpr);
+nSamples = nrow(my.datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(my.datExpr, labels2colors(net$colors))$eigengenes
+MEs = orderMEs(MEs0)
+cp = bicorAndPvalue(MEs, t(my.datTraits))
+moduleTraitCor = cp$bicor;
+moduleTraitPvalue = cp$p;
+
+output.filepath<-file.path(output.dir,paste("heatmap_trait_correlation_modules_outliers_",i,"_pvaluesig_adjsuted.eps",sep=""))
+#pdf(file = output.filepath,width = 15,height = 9,paper="special")
+#sizeGrWindow(15,9)
+postscript(output.filepath,width=10,height=12,paper="special")
+#pdf(file="Plots/moduleTraitRelationships.pdf", width=10, height=6);
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(12, 12, 3, 1));
+# Display the correlation values within a heatmap plot
+temp.moduleTraitPvalue<-moduleTraitPvalue
+temp.moduleTraitCor<-moduleTraitCor
+temp.moduleTraitCor[temp.moduleTraitPvalue>0.05]<-NA
+
+labeledHeatmap(Matrix = temp.moduleTraitCor,
+xLabels = rownames(my.datTraits[]),
+yLabels = names(MEs),
+ySymbols = names(MEs),
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+#cex.text=0.8,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"),
+naColor="white")
+#savePlot(output.filepath,type="jpeg")
+dev.off()
+
+```
+
+
 
 ```{r fig.cap=figure_nums_1(name="wgcna_unadjusted_heatmap_1",caption="Heatmap showing the correlation between the identified gene modules and the clinical traits for the unadjusted data."),echo=FALSE,cache=FALSE,results='hide'}
 ```
 `r figure_nums_1(name="wgcna_unadjusted_heatmap_1")`
 ```{r}
-knitr::include_graphics(file.path(wgcna.dir,"heatmap_trait_correlation_modules_outliers_withratio_7_pvaluesig.jpg"))
+knitr::include_graphics(file.path(wgcna.dir,"heatmap_trait_correlation_modules_outliers_2_pvaluesig.jpg"))
 ```
 
 ```{r results='hide'}
