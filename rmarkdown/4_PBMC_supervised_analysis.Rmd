@@ -1215,3 +1215,243 @@ ggsave(filename = "Figure2a_SupervisedAnalysis_OverlapMatrix_breakdown.eps",path
 
 
 
+
+
+## DESeq2
+We identify the differentially expressed genes between give groups of subjects using DESeq2.
+
+```{r}
+library(DESeq2)
+library(apeglm)
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","rawcounts_baseline_276_clean.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2")
+
+# load in the raw counts matrix
+count.matrix<-read.table(count.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+
+# loading the clinic data and match it with the raw count matrix
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.matrix<-clinic.matrix[colnames(count.matrix),]
+
+# replace space in the PHENGRP values with -
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="-")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="-")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="--",replace="-")
+```
+
+Stage II-III, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage-II-III-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage-II-III-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef="PHENGRP_Stage.IV.untreated_vs_Stage.II.III.untreated", type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05)," genes with FDR<0.05.\n",sep="")
+```
+
+Stage I, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non-acute-Stage-I-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non-acute-Stage-I-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+Stage I & II-III, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated")]<-"Stage-I-II-III-untreated"
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage-I-II-III-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage-I-II-III-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+
+Acute sarcoid, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Acute-Sarcoidosis-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Acute-Sarcoidosis-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Acute-Sarcoidosis-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+Steroid vs non-steroid usage patients:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix[!is.na(clinic.matrix$steroid_atv1),]
+my.coldata$steroid_atv1<-factor(my.coldata$steroid_atv1,levels=c(0,1))
+my.coldata$steroid_atv1 <- relevel(my.coldata$steroid_atv1, ref = "0")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ steroid_atv1)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+## edgeR
+We identify the differentially expressed genes between give groups of subjects using edgeR.
+
