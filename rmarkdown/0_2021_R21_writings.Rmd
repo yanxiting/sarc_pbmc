@@ -1,0 +1,79 @@
+---
+title: "WGCNA of SARC PBMC DESeq2 Normalized RNAseq data"
+author: "Xiting Yan"
+date: "09/08/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+library(WGCNA)
+library(xlsx)
+
+knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/xy48"
+source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+```
+
+There are 209 clean BAL samples. We count the number of clean samples for PBMC baseline and all available samples for PBMC 6 mons.
+
+```{r}
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+clinic.matrix<-read.xlsx(clinic.filepath,sheetIndex=3,stringsAsFactor=F)
+colnames(clinic.matrix)<-as.matrix(clinic.matrix)[2,]
+clinic.matrix<-clinic.matrix[-c(1,2),]
+
+# extract the grads ID with clean PBMC baseline data
+pbmc.baseline.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/TPM_baseline_276_clean_GRADSID.txt")
+pbmc.baseline.matrix<-read.table(pbmc.baseline.filepath,sep="\t",header=T,check.names=F,comment.char="")
+pbmc.baseline.sampleid<-colnames(pbmc.baseline.matrix)[6:ncol(pbmc.baseline.matrix)]
+
+# extract the grads ID with clean BAL baseline data
+bal.baseline.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt")
+bal.baseline.matrix<-read.table(bal.baseline.filepath,sep="\t",header=T,check.names=F,comment.char="")
+bal.baseline.sampleid<-colnames(bal.baseline.matrix)[10:ncol(bal.baseline.matrix)]
+bal.baseline.sampleid<-unname(sapply(bal.baseline.sampleid,my.element.extract,splitchar="_",index=1))
+#convert the sample id to grads id.
+temp<-clinic.matrix[as.matrix(clinic.matrix)[,4]%in%bal.baseline.sampleid,]
+rownames(temp)<-as.matrix(temp)[,4]
+temp<-as.matrix(temp)[bal.baseline.sampleid,1]
+bal.baseline.sampleid<-temp
+
+```
+
+
+We also count how many of these samples are from the same subjects.
+```{r}
+```
