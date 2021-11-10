@@ -52,6 +52,8 @@ In this note, we adjust the gene expression to remove the effect of cell differe
 We ran this notes on the workstation with files read from the mounted grace hpc scratch folders.
 
 # Data adjustment for cell differentials
+
+## No Log2 Transformation
 We remove the effect of cell differentials using a linear regression model. 
 ```{r eval=FALSE}
 ######################################################
@@ -121,6 +123,77 @@ output.filepath<-file.path(output.subdir,"TPM_baseline_276_clean_celldiffadjuste
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 ```
 
+## With Log2 Transformation
+
+We also adjusted the data with taking log2 transformation first. 
+
+```{r eval=FALSE}
+######################################################
+# This code chunk only needs to be run once.
+######################################################
+
+#home.dir<-"/home/xy48"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","log2TPM_baseline_276_clean_GRADSID.txt")
+masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data_PBMC/clin_data_visit1_XY.csv")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char="")
+anno.matrix<-as.matrix(fpkm.matrix)[,1:5]
+rownames(anno.matrix)<-paste(anno.matrix[,"Gene_Id"],"_",anno.matrix[,"Chr"],sep="")
+rownames(fpkm.matrix)<-paste(anno.matrix[,"Gene_Id"],"_",anno.matrix[,"Chr"],sep="")
+data.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+#rownames(data.matrix)<-paste(anno.matrix[,"Gene_Id"],"_",anno.matrix[,"Chr"],sep="")
+
+# load in the clinical data matrix
+#clinic.matrix=read.table(clinic.filepath,header=T,sep="\t",check.names=F,stringsAsFactors=F,quote = "")
+clinic.matrix<-read.csv(clinic.filepath,check.names=F,header=T,as.is=TRUE)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[colnames(data.matrix),]
+
+my.data.matrix<-data.matrix
+collectGarbage()
+
+# for each gene, adjust the data using the cell differentials
+cell.data<-clinic.matrix[,c("p_mono","p_eos","p_lymph","p_neut","p_baso")]
+cell.data["06S026","p_lymph"]<-25.3
+cell.data["04S050",]<-rep(NA,ncol(cell.data))
+
+#my.data.matrix<-my.data.matrix[,!is.na(cell.data[,2])]
+my.data.matrix<-my.data.matrix[,apply(is.na(cell.data),1,sum)==0]
+cell.data<-cell.data[apply(is.na(cell.data),1,sum)==0,]
+
+# make sure all the cell differentials add up to 100
+#temp.matrix<-apply(cell.data,1,sum)
+#temp.matrix<-matrix(rep(temp.matrix,ncol(cell.data)),nrow=nrow(cell.data),byrow=F)
+#cell.data<-cell.data*100/temp.matrix
+
+# get rid of the neutrophil and adjust the other cell differentials to sum up to 100%
+cell.data.orig<-cell.data
+cell.data<-cell.data[,colnames(cell.data)!="p_neut"]
+temp.matrix<-matrix(rep(apply(cell.data,1,sum),ncol(cell.data)),nrow=nrow(cell.data),byrow=F)
+cell.data<-cell.data*80/temp.matrix
+
+# adjust the data
+res.matrix<-numeric()
+for(i in 1:nrow(my.data.matrix)){
+  temp.data<-data.frame(gexp=t(my.data.matrix[i,]),mono=cell.data[,1],eos=cell.data[,2],lym=cell.data[,3])
+  colnames(temp.data)[1]<-"gexp"
+  my.res<-lm(gexp~.,data=temp.data)$residuals
+  res.matrix<-rbind(res.matrix,my.res)
+}
+rownames(res.matrix)<-rownames(my.data.matrix)
+colnames(res.matrix)<-colnames(my.data.matrix)
+cmd.out<-cbind(anno.matrix[rownames(res.matrix),],res.matrix)
+
+output.subdir<-file.path(output.dir,"data_adjusted2")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+output.filepath<-file.path(output.subdir,"log2TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+```
 
 
 # WGCNA on PBMC baseline adjusted data
