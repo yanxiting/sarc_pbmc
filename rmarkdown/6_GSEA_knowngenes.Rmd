@@ -231,8 +231,6 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           output.dir=output.folder,
                           suffix.name="analysis4"
                           )
-
-
 ```
 
 
@@ -387,5 +385,15 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           suffix.name="analysis4"
                           )
 
+# generate the files for analysis 5. 
+varnames<-c("PHENGRP")
+my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(PHENGRP=c("Remitting, untreated")),
+                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated")),
+                          output.dir=output.folder,
+                          suffix.name="analysis5"
+                          )
 
 ```
