@@ -237,6 +237,59 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
 
 # DESeq2 log2 adjusted data
 
+We first generate file containing both the clinical matrix and CT scan features so that both group 1 and group 2 in the GSEA analysis can be defined based on combinations of clinical triats and CT scan data.
+
+```{r eval=FALSE}
+# These codes only need to be run once
+# load in the clinical matrix
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+# load in the CT scan data
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,sheet=1)
+rownames(ct.matrix)<-as.matrix(ct.matrix)[,"GRADSID"]
+ct.matrix<-ct.matrix[,c("Med_Lymphadenopathy","Hilar_Lymphadenopathy","Micronodule","Bronchial_Wall_Thickening","Traction_Bronchiectasis","Bronchiectasis_severity","Ground_Glass","Honeycombing","Reticular_Abnormality","Pulmonary_Art","Tree_in_bud")]
+
+# load in the fpkm matrix
+fpkm.file=file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","DESeq2_normalized_276_clean_log2_celldiffadjusted_withannot.txt")
+
+fpkm.matrix<-read.table(fpkm.file,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+
+fpkm.matrix.anno<-fpkm.matrix[,1:6]
+fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+
+# merge the two data
+clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+ct.matrix<-ct.matrix[colnames(fpkm.matrix),]
+rownames(clinic.matrix)<-colnames(fpkm.matrix)
+rownames(ct.matrix)<-colnames(fpkm.matrix)
+
+cmd.out<-cbind(clinic.matrix,ct.matrix)
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.RDS")
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.txt")
+write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F,append=F)
+
+# change the file access right so that these two files won't be changed accidentally
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.RDS")
+system(paste("chmod a-w ",output.filepath,sep=""))
+
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.txt")
+system(paste("chmod a-w ",output.filepath,sep=""))
+
+```
+
+Also generate the clinical matrix file.
+```{r eval=FALSE}
+# These codes only need to be run once.
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+write.table(clinic.matrix,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F,append=F)
+
+```
+
 We generate input files for the differential expressed genes between nonacute stage I untreated vs all other groups based on Laura's observations. 
 
 ```{r}
@@ -244,11 +297,11 @@ We generate input files for the differential expressed genes between nonacute st
 # output the merged clinical data matrix as a txt file
 clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
 clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
-output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
-write.table(clinic.matrix,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F,append=F)
+#output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+#write.table(clinic.matrix,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F,append=F)
 
 
-
+# note this function is slightly different for DESeq2 Norm data and the TPM matrix
 my_gsea_filecreate_binary<-function(fpkm.filepath,clinic.filepath,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
   #####################################################################################################################################################
   # Arguments:
@@ -296,8 +349,677 @@ my_gsea_filecreate_binary<-function(fpkm.filepath,clinic.filepath,var.names,grou
   
   # load in the fpkm matrix
   fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
-  fpkm.matrix.anno<-fpkm.matrix[,1:5]
-  fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+  fpkm.matrix.anno<-fpkm.matrix[,1:6]
+  fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+  
+  # load in the clinical data and subset the samples to those listed in the fpkm.matrix
+  clinic.matrix=read.table(clinic.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F)
+  rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+  clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+  # based on var.name, group1.values, and group2.values, identify the samples to include in the files.
+  if(file.exists(output.dir)==F){
+    dir.create(output.dir)
+  }
+  
+  gct.filepath<-file.path(output.dir,paste("gexp_",suffix.name,".gct",sep=""))
+  cls.filepath<-file.path(output.dir,paste("cls_",suffix.name,".cls",sep=""))
+  
+  # substract samples with var.name equal to the values in group1.values and group2. values
+  temp1<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group1.values,1,paste,collapse="_")]
+  #cat("\n")
+  #cat(apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_"))
+  #cat("\n")
+  temp2<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group2.values,1,paste,collapse="_")]
+  cat("There are ",ncol(temp1)," and ", ncol(temp2)," samples for group1 and group2, respectively.\n")
+  data.matrix<-cbind(temp1,temp2)
+  data.matrix<-cbind(fpkm.matrix.anno[,1],rep("na",nrow(data.matrix)),data.matrix)
+  colnames(data.matrix)[1:2]<-c("NAME","Description")
+  pheno.vect<-c(rep(0,ncol(temp1)),rep(1,ncol(temp2)))
+  
+  # output the gene expression data
+  cmd.out<-"#1.2\n"
+  cmd.out<-paste(cmd.out,nrow(data.matrix),"\t",ncol(data.matrix)-2,"\n",sep="")
+  cat(cmd.out,file=gct.filepath,append=F)
+  write.table(data.matrix,sep="\t",file=gct.filepath,append=T,row.names=F,col.names=T,quote=F)
+  
+  # output the phenotype file
+  cmd.out<-paste(ncol(data.matrix)-2," ",2," ",1,"\n",sep="")
+  cmd.out<-paste(cmd.out,"# group1 group2\n",sep="")
+  cat(cmd.out,file=cls.filepath,append=F,sep="")
+  cat(pheno.vect,file=cls.filepath,append=T,sep=" ")
+  
+  results<-list(group1=temp1,group2=temp2)
+  
+  return(results)
+}
+
+
+
+fpkm.file=file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","DESeq2_normalized_276_clean_log2_celldiffadjusted_withannot.txt")
+clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+output.folder<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted"
+
+# generate the files for analysis 1
+varnames<-c("PHENGRP")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated")),
+                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage IV, untreated")),
+                          output.dir=output.folder,
+                          suffix.name="analysis1"
+                          )
+
+# generate the files for analysis 2
+varnames<-c("PHENGRP")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(PHENGRP=c("Remitting, untreated")),
+                          group2.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated","Stage II-III, untreated","Stage IV, untreated")),
+                          output.dir=output.folder,
+                          suffix.name="analysis2"
+                          )
+
+# generate the files for analysis 3
+varnames<-c("PHENGRP")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(PHENGRP=c("Stage IV, untreated")),
+                          group2.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated","Stage II-III, untreated")),
+                          output.dir=output.folder,
+                          suffix.name="analysis3"
+                          )
+# generate the files for analysis 4. If we directly specify group1.values using numbers, it won't work. I had to specify them to be a space+number as a character.
+varnames<-c("nodule_lymph_pheno","steroid_atv1","dmard_atv1")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(nodule_lymph_pheno=c("lymph"),steroid_atv1=c(" 0"),dmard_atv1=c(" 0")),
+                          group2.values = data.frame(nodule_lymph_pheno=c("micronodule","both"),steroid_atv1=c(" 0"," 0"),dmard_atv1=c(" 0"," 0")),
+                          output.dir=output.folder,
+                          suffix.name="analysis4"
+                          )
+
+# generate the files for analysis 5. 
+varnames<-c("PHENGRP")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(PHENGRP=c("Remitting, untreated")),
+                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated")),
+                          output.dir=output.folder,
+                          suffix.name="analysis5"
+                          )
+
+
+# generate the files for analysis 4a. If we directly specify group1.values using numbers, it won't work. I had to specify them to be a space+number as a character.
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.txt"
+
+varnames<-c("nodule_lymph_pheno","steroid_atv1","dmard_atv1","Ground_Glass","Honeycombing","Reticular_Abnormality")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(nodule_lymph_pheno=c("lymph"),steroid_atv1=c(" 0"),dmard_atv1=c(" 0"),Ground_Glass=c(" 0"),Honeycombing=c(" 0"),Reticular_Abnormality=c(" 0")),
+                          group2.values = data.frame(nodule_lymph_pheno=c("micronodule","both"),steroid_atv1=c(" 0"," 0"),dmard_atv1=c(" 0"," 0"),Ground_Glass=c(" 0"," 0"),Honeycombing=c(" 0"," 0"),Reticular_Abnormality=c(" 0"," 0")),
+                          output.dir=output.folder,
+                          suffix.name="analysis4a"
+                          )
+
+# generate the files for analysis 4b. If we directly specify group1.values using numbers, it won't work. I had to specify them to be a space+number as a character.
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_ct_merge_matrix_withgex.txt"
+
+varnames<-c("nodule_lymph_pheno","steroid_atv1","dmard_atv1","Ground_Glass","Honeycombing","Reticular_Abnormality")
+temp<-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
+                          clinic.filepath = clinic.file,
+                          var.names = varnames,
+                          group1.values = data.frame(nodule_lymph_pheno=c("lymph"),steroid_atv1=c(" 0"),dmard_atv1=c(" 0"),Ground_Glass=c(" 0"),Honeycombing=c(" 0"),Reticular_Abnormality=c(" 0")),
+                          group2.values = data.frame(nodule_lymph_pheno=c("micronodule"),steroid_atv1=c(" 0"),dmard_atv1=c(" 0"),Ground_Glass=c(" 0"),Honeycombing=c(" 0"),Reticular_Abnormality=c(" 0")),
+                          output.dir=output.folder,
+                          suffix.name="analysis4b"
+                          )
+```
+
+We also generate GSEA input files for patients from given lists including the following:
+
+* Stage I, untreated and lymphadenopathy only overlapped patients 
+* Stage I, untread only patients
+* lymphadenopathy only patients
+
+These three analysis is to see if the overlapped patients drove the significant results.
+
+```{r}
+grads.id.list<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted/gradsid_overlap_nonoverlap.xlsx")
+grads.id.matrix<-read.xls(grads.id.list,sheet=1)
+overlap.id<-as.character(grads.id.matrix[,1])[as.character(grads.id.matrix[,1])!=""]
+stage1only.id<-as.character(grads.id.matrix[,2])[as.character(grads.id.matrix[,2])!=""]
+lymphonly.id<-as.character(grads.id.matrix[,3])[as.character(grads.id.matrix[,3])!=""]
+
+
+#----------------------------------------------------------------------------------------------------------------
+# Part 1: 12 stage I, untreated and lymph only patients
+#----------------------------------------------------------------------------------------------------------------
+# load in the data
+fpkm.file=file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","DESeq2_normalized_276_clean_log2_celldiffadjusted_withannot.txt")
+clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+output.folder<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted"
+suffix.name<-"analysis6"
+var.names=c("PHENGRP")
+group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage IV, untreated"))
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.file,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:6]
+fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+  
+# load in the clinical data and subset the samples to those listed in the fpkm.matrix
+clinic.matrix=read.table(clinic.file,sep="\t",header=T,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+# based on var.name, group1.values, and group2.values, identify the samples to include in the files.
+if(file.exists(output.folder)==F){
+  dir.create(output.folder)
+}
+  
+gct.filepath<-file.path(output.folder,paste("gexp_",suffix.name,".gct",sep=""))
+cls.filepath<-file.path(output.folder,paste("cls_",suffix.name,".cls",sep=""))
+  
+# substract samples with var.name equal to the values in group1.values and group2. values
+#temp1<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group1.values,1,paste,collapse="_")]
+temp1<-fpkm.matrix[,overlap.id]
+temp2<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group2.values,1,paste,collapse="_")]
+
+cat("There are ",ncol(temp1)," and ", ncol(temp2)," samples for group1 and group2, respectively.\n")
+data.matrix<-cbind(temp1,temp2)
+data.matrix<-cbind(fpkm.matrix.anno[,1],rep("na",nrow(data.matrix)),data.matrix)
+colnames(data.matrix)[1:2]<-c("NAME","Description")
+pheno.vect<-c(rep(0,ncol(temp1)),rep(1,ncol(temp2)))
+
+# output the gene expression data
+cmd.out<-"#1.2\n"
+cmd.out<-paste(cmd.out,nrow(data.matrix),"\t",ncol(data.matrix)-2,"\n",sep="")
+cat(cmd.out,file=gct.filepath,append=F)
+write.table(data.matrix,sep="\t",file=gct.filepath,append=T,row.names=F,col.names=T,quote=F)
+
+# output the phenotype file
+cmd.out<-paste(ncol(data.matrix)-2," ",2," ",1,"\n",sep="")
+cmd.out<-paste(cmd.out,"# group1 group2\n",sep="")
+cat(cmd.out,file=cls.filepath,append=F,sep="")
+cat(pheno.vect,file=cls.filepath,append=T,sep=" ")
+#----------------------------------------------------------------------------------------------------------------
+
+# part 2: stage I only
+#----------------------------------------------------------------------------------------------------------------
+# load in the data
+fpkm.file=file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","DESeq2_normalized_276_clean_log2_celldiffadjusted_withannot.txt")
+clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+output.folder<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted"
+suffix.name<-"analysis7"
+var.names=c("PHENGRP")
+group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage IV, untreated"))
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.file,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:6]
+fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+  
+# load in the clinical data and subset the samples to those listed in the fpkm.matrix
+clinic.matrix=read.table(clinic.file,sep="\t",header=T,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+# based on var.name, group1.values, and group2.values, identify the samples to include in the files.
+if(file.exists(output.folder)==F){
+  dir.create(output.folder)
+}
+  
+gct.filepath<-file.path(output.folder,paste("gexp_",suffix.name,".gct",sep=""))
+cls.filepath<-file.path(output.folder,paste("cls_",suffix.name,".cls",sep=""))
+  
+# substract samples with var.name equal to the values in group1.values and group2. values
+#temp1<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group1.values,1,paste,collapse="_")]
+temp1<-fpkm.matrix[,stage1only.id]
+temp2<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group2.values,1,paste,collapse="_")]
+
+cat("There are ",ncol(temp1)," and ", ncol(temp2)," samples for group1 and group2, respectively.\n")
+data.matrix<-cbind(temp1,temp2)
+data.matrix<-cbind(fpkm.matrix.anno[,1],rep("na",nrow(data.matrix)),data.matrix)
+colnames(data.matrix)[1:2]<-c("NAME","Description")
+pheno.vect<-c(rep(0,ncol(temp1)),rep(1,ncol(temp2)))
+
+# output the gene expression data
+cmd.out<-"#1.2\n"
+cmd.out<-paste(cmd.out,nrow(data.matrix),"\t",ncol(data.matrix)-2,"\n",sep="")
+cat(cmd.out,file=gct.filepath,append=F)
+write.table(data.matrix,sep="\t",file=gct.filepath,append=T,row.names=F,col.names=T,quote=F)
+
+# output the phenotype file
+cmd.out<-paste(ncol(data.matrix)-2," ",2," ",1,"\n",sep="")
+cmd.out<-paste(cmd.out,"# group1 group2\n",sep="")
+cat(cmd.out,file=cls.filepath,append=F,sep="")
+cat(pheno.vect,file=cls.filepath,append=T,sep=" ")
+#----------------------------------------------------------------------------------------------------------------
+# part 3: lymph only
+#----------------------------------------------------------------------------------------------------------------
+# load in the data
+fpkm.file=file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","DESeq2_normalized_276_clean_log2_celldiffadjusted_withannot.txt")
+clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+output.folder<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted"
+suffix.name<-"analysis8"
+var.names=c("PHENGRP")
+group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage IV, untreated"))
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.file,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:6]
+fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+  
+# load in the clinical data and subset the samples to those listed in the fpkm.matrix
+clinic.matrix=read.table(clinic.file,sep="\t",header=T,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+# based on var.name, group1.values, and group2.values, identify the samples to include in the files.
+if(file.exists(output.folder)==F){
+  dir.create(output.folder)
+}
+  
+gct.filepath<-file.path(output.folder,paste("gexp_",suffix.name,".gct",sep=""))
+cls.filepath<-file.path(output.folder,paste("cls_",suffix.name,".cls",sep=""))
+  
+# substract samples with var.name equal to the values in group1.values and group2. values
+#temp1<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group1.values,1,paste,collapse="_")]
+temp1<-fpkm.matrix[,lymphonly.id]
+temp2<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group2.values,1,paste,collapse="_")]
+
+cat("There are ",ncol(temp1)," and ", ncol(temp2)," samples for group1 and group2, respectively.\n")
+data.matrix<-cbind(temp1,temp2)
+data.matrix<-cbind(fpkm.matrix.anno[,1],rep("na",nrow(data.matrix)),data.matrix)
+colnames(data.matrix)[1:2]<-c("NAME","Description")
+pheno.vect<-c(rep(0,ncol(temp1)),rep(1,ncol(temp2)))
+
+# output the gene expression data
+cmd.out<-"#1.2\n"
+cmd.out<-paste(cmd.out,nrow(data.matrix),"\t",ncol(data.matrix)-2,"\n",sep="")
+cat(cmd.out,file=gct.filepath,append=F)
+write.table(data.matrix,sep="\t",file=gct.filepath,append=T,row.names=F,col.names=T,quote=F)
+
+# output the phenotype file
+cmd.out<-paste(ncol(data.matrix)-2," ",2," ",1,"\n",sep="")
+cmd.out<-paste(cmd.out,"# group1 group2\n",sep="")
+cat(cmd.out,file=cls.filepath,append=F,sep="")
+cat(pheno.vect,file=cls.filepath,append=T,sep=" ")
+#----------------------------------------------------------------------------------------------------------------
+```
+
+We examine the CT features of these three groups of patients.
+```{r}
+# load in the list of GRADS IDs in all three groups
+grads.id.list<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted/gradsid_overlap_nonoverlap.xlsx")
+grads.id.matrix<-read.xls(grads.id.list,sheet=1)
+overlap.id<-as.character(grads.id.matrix[,1])[as.character(grads.id.matrix[,1])!=""]
+stage1only.id<-as.character(grads.id.matrix[,2])[as.character(grads.id.matrix[,2])!=""]
+lymphonly.id<-as.character(grads.id.matrix[,3])[as.character(grads.id.matrix[,3])!=""]
+
+# load in the clinical data
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS")
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.matrix<-clinic.matrix[,c("GENDER","RACE","ethn","AGE","ethor","wbc","cd4","cal","d25","d125","crp","p_lymph","p_mono","p_neut","p_eos","p_baso","FVCPRED","FEV1PRED","PREDDLCO","SCADDING","smoke","pk_yr","steroid_atv1","dmard_atv1","Micronodule","Med_Lymphadenopathy","Hilar_Lymphadenopathy","nodule_lymph_pheno")]
+clinic.matrix<-clinic.matrix[c(overlap.id,stage1only.id,lymphonly.id),]
+
+# generate the summary table
+
+var.names<-c("GENDER","RACE","AGE","ethor","wbc","cd4","cal","d25","d125","crp","p_lymph","p_mono","p_neut","p_eos","p_baso","FVCPRED","FEV1PRED","PREDDLCO","SCADDING","smoke","pk_yr","steroid_atv1","dmard_atv1","Micronodule","Med_Lymphadenopathy","Hilar_Lymphadenopathy","nodule_lymph_pheno")
+
+var.names.cat<-c("GENDER","RACE","ethor","smoke","steroid_atv1","dmard_atv1","SCADDING","Micronodule","Med_Lymphadenopathy","Hilar_Lymphadenopathy","nodule_lymph_pheno")
+var.names.con<-c("AGE","wbc","cd4","cal","d25","d125","crp","p_lymph","p_mono","p_neut","p_eos","p_baso","FVCPRED","FEV1PRED","PREDDLCO","pk_yr")
+
+var.type<-rep("con",length(var.names))
+var.type[var.names%in%var.names.cat]<-"cat"
+var.annot<-var.names
+
+summary.table<-character()
+
+for(i in 1:length(var.names)){
+  if(var.type[i]=="cat"){
+    temp.matrix<-as.matrix(table(clinic.matrix[overlap.id,var.names[i]]))
+    rownames(temp.matrix)<-paste(var.annot[i]," - ",rownames(temp.matrix))
+    
+    temp.sum<-sum(temp.matrix)
+    temp.matrix2<-temp.matrix/temp.sum
+    summary.table<-rbind(summary.table,as.matrix(paste(temp.matrix,"(",round(temp.matrix2,digits=2),")",sep="")))
+    rownames(summary.table)[(nrow(summary.table)-nrow(temp.matrix)+1):nrow(summary.table)]<-rownames(temp.matrix)
+    }else{
+    temp.mean<-mean(clinic.matrix[overlap.id,var.names[i]],na.rm=T)
+    temp.sd<-sd(clinic.matrix[overlap.id,var.names[i]],na.rm=T)
+    temp.mean<-round(temp.mean,digits=2)
+    temp.sd<-round(temp.sd,digits=2)
+    summary.table<-rbind(summary.table,paste(temp.mean,"±",temp.sd,sep=""))
+    rownames(summary.table)[nrow(summary.table)]<-paste(var.annot[i],", mean±SD",sep="")
+  }
+  
+}
+
+colnames(summary.table)[1]<-"Overlap"
+summary.table.total<-summary.table
+
+
+summary.table<-character()
+
+for(i in 1:length(var.names)){
+  if(var.type[i]=="cat"){
+    temp.matrix<-as.matrix(table(clinic.matrix[stage1only.id,var.names[i]]))
+    rownames(temp.matrix)<-paste(var.annot[i]," - ",rownames(temp.matrix))
+    
+    temp.sum<-sum(temp.matrix)
+    temp.matrix2<-temp.matrix/temp.sum
+    summary.table<-rbind(summary.table,as.matrix(paste(temp.matrix,"(",round(temp.matrix2,digits=2),")",sep="")))
+    rownames(summary.table)[(nrow(summary.table)-nrow(temp.matrix)+1):nrow(summary.table)]<-rownames(temp.matrix)
+    }else{
+    temp.mean<-mean(clinic.matrix[stage1only.id,var.names[i]],na.rm=T)
+    temp.sd<-sd(clinic.matrix[stage1only.id,var.names[i]],na.rm=T)
+    temp.mean<-round(temp.mean,digits=2)
+    temp.sd<-round(temp.sd,digits=2)
+    summary.table<-rbind(summary.table,paste(temp.mean,"±",temp.sd,sep=""))
+    rownames(summary.table)[nrow(summary.table)]<-paste(var.annot[i],", mean±SD",sep="")
+  }
+  
+}
+
+colnames(summary.table)[1]<-"Stage I only"
+
+temp.names<-union(rownames(summary.table.total),rownames(summary.table))
+temp<-matrix("",nrow=length(temp.names),ncol=2)
+rownames(temp)<-temp.names
+temp[rownames(summary.table.total),1]<-summary.table.total[,1]
+temp[rownames(summary.table),2]<-summary.table[,1]
+summary.table.total<-temp
+
+
+summary.table<-character()
+
+for(i in 1:length(var.names)){
+  if(var.type[i]=="cat"){
+    temp.matrix<-as.matrix(table(clinic.matrix[lymphonly.id,var.names[i]]))
+    rownames(temp.matrix)<-paste(var.annot[i]," - ",rownames(temp.matrix))
+    
+    temp.sum<-sum(temp.matrix)
+    temp.matrix2<-temp.matrix/temp.sum
+    summary.table<-rbind(summary.table,as.matrix(paste(temp.matrix,"(",round(temp.matrix2,digits=2),")",sep="")))
+    rownames(summary.table)[(nrow(summary.table)-nrow(temp.matrix)+1):nrow(summary.table)]<-rownames(temp.matrix)
+    }else{
+    temp.mean<-mean(clinic.matrix[lymphonly.id,var.names[i]],na.rm=T)
+    temp.sd<-sd(clinic.matrix[lymphonly.id,var.names[i]],na.rm=T)
+    temp.mean<-round(temp.mean,digits=2)
+    temp.sd<-round(temp.sd,digits=2)
+    summary.table<-rbind(summary.table,paste(temp.mean,"±",temp.sd,sep=""))
+    rownames(summary.table)[nrow(summary.table)]<-paste(var.annot[i],", mean±SD",sep="")
+  }
+  
+}
+
+colnames(summary.table)[1]<-"Lymph only"
+
+temp.names<-union(rownames(summary.table.total),rownames(summary.table))
+temp<-matrix("",nrow=length(temp.names),ncol=3)
+rownames(temp)<-temp.names
+temp[rownames(summary.table.total),1]<-summary.table.total[,1]
+temp[rownames(summary.table.total),2]<-summary.table.total[,2]
+temp[rownames(summary.table),3]<-summary.table[,1]
+
+summary.table.total<-temp
+
+colnames(summary.table.total)<-c("overlap","Stage 1 only","Lymph only")
+
+
+# calculate the p values to assess the differences between the three groups of patients for each trait
+
+pvalue.vect<-numeric()
+
+for(i in 1:length(var.names)){
+  
+  if(var.type[i]=="cat"){
+    temp.matrix<-as.matrix(table(clinic.matrix[c(overlap.id,stage1only.id,lymphonly.id),var.names[i]]))
+    rownames(temp.matrix)<-paste(var.annot[i]," - ",rownames(temp.matrix))
+    
+    temp1<-clinic.matrix[c(overlap.id,stage1only.id,lymphonly.id),var.names[i]]
+    temp2<-c(rep("overlap",length(overlap.id)),rep("stage1",length(stage1only.id)),rep("lymph",length(lymphonly.id)))
+    temp.index<-1:length(temp1)
+    temp.index<-temp.index[!(is.na(temp1) | is.na(temp2))]
+    temp1<-temp1[temp.index]
+    temp2<-temp2[temp.index]
+    
+    if(length(unique(temp1))==1){
+      pvalue.vect<-c(pvalue.vect, rep(1,length(unique(temp1))))
+      names(pvalue.vect)[length(pvalue.vect)]<-rownames(temp.matrix)
+    }else{
+      pvalue.vect<-c(pvalue.vect, rep(chisq.test(temp1,as.factor(temp2))$p.value,length(unique(temp1))))  
+      names(pvalue.vect)[(length(pvalue.vect)-length(unique(temp1))+1):length(pvalue.vect)]<-rownames(temp.matrix)
+    }
+    
+    
+    }else{
+    temp1<-clinic.matrix[c(overlap.id,stage1only.id,lymphonly.id),var.names[i]]
+    temp2<-c(rep("overlap",length(overlap.id)),rep("stage1",length(stage1only.id)),rep("lymph",length(lymphonly.id)))
+    pvalue.vect<-c(pvalue.vect, kruskal.test(temp1~as.factor(temp2))$p.value)
+    names(pvalue.vect)[length(pvalue.vect)]<-paste(var.annot[i],", mean±SD",sep="")
+  }
+  
+}
+
+summary.table.total<-cbind(summary.table.total,pvalue.vect[rownames(summary.table.total)])
+colnames(summary.table.total)[4]<-"p value"
+
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted/gradsid_overlap_nonoverlap_clinicfeatures.xlsx")
+write.xlsx(summary.table.total,file=output.filepath,row.names=T,col.names=T,append=F)
+
+```
+
+We also generate the feature table for the CT scan variables.
+
+```{r}
+# load in the list of GRADS IDs in all three groups
+grads.id.list<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted/gradsid_overlap_nonoverlap.xlsx")
+grads.id.matrix<-read.xls(grads.id.list,sheet=1)
+overlap.id<-as.character(grads.id.matrix[,1])[as.character(grads.id.matrix[,1])!=""]
+stage1only.id<-as.character(grads.id.matrix[,2])[as.character(grads.id.matrix[,2])!=""]
+lymphonly.id<-as.character(grads.id.matrix[,3])[as.character(grads.id.matrix[,3])!=""]
+
+# load in the clinical data
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,sheet=1)
+rownames(ct.matrix)<-as.matrix(ct.matrix)[,"GRADSID"]
+ct.matrix<-ct.matrix[,c("Med_Lymphadenopathy","Hilar_Lymphadenopathy","Micronodule","Bronchial_Wall_Thickening","Traction_Bronchiectasis","Bronchiectasis_severity","Ground_Glass","Honeycombing","Reticular_Abnormality","Pulmonary_Art","Tree_in_bud")]
+
+ct.matrix<-ct.matrix[c(overlap.id,stage1only.id,lymphonly.id),]
+group.vect<-c(rep("overlap",length(overlap.id)),rep("Stage I",length(stage1only.id)),rep("Lymph",length(lymphonly.id)))
+
+# recode Med_Lymphadenopathy and Hilar_Lymphadenopathy
+temp<-ct.matrix[,"Med_Lymphadenopathy"]
+temp1<-rep(0,length(temp))
+temp1[temp%in%c(1,2)]<-1
+temp1[temp==3]<-2   # 0=no, 1=one side, 2=billateral
+ct.matrix[,"Med_Lymphadenopathy"]<-temp1
+
+
+temp<-ct.matrix[,"Hilar_Lymphadenopathy"]
+temp1<-rep(0,length(temp))
+temp1[temp%in%c(1,2)]<-1
+temp1[temp==3]<-2   # 0=no, 1=one side, 2=billateral
+ct.matrix[,"Hilar_Lymphadenopathy"]<-temp1
+
+
+# generate the summary table
+var.names<-c("Med_Lymphadenopathy","Hilar_Lymphadenopathy","Micronodule","Bronchial_Wall_Thickening","Traction_Bronchiectasis","Bronchiectasis_severity","Ground_Glass","Honeycombing","Reticular_Abnormality","Pulmonary_Art","Tree_in_bud")
+
+summary.table<-character()
+
+for(i in 1:length(var.names)){
+  
+    temp.matrix<-as.matrix(table(ct.matrix[overlap.id,var.names[i]]))
+    rownames(temp.matrix)<-paste(var.names[i]," - ",rownames(temp.matrix))
+    
+    temp.sum<-sum(temp.matrix)
+    temp.matrix2<-temp.matrix/temp.sum
+    summary.table<-rbind(summary.table,as.matrix(paste(temp.matrix,"(",round(temp.matrix2,digits=2),")",sep="")))
+    rownames(summary.table)[(nrow(summary.table)-nrow(temp.matrix)+1):nrow(summary.table)]<-rownames(temp.matrix)
+}
+
+colnames(summary.table)[1]<-"Overlap"
+summary.table.total<-summary.table
+
+summary.table<-character()
+
+for(i in 1:length(var.names)){
+  
+    temp.matrix<-as.matrix(table(ct.matrix[stage1only.id,var.names[i]]))
+    rownames(temp.matrix)<-paste(var.names[i]," - ",rownames(temp.matrix))
+    
+    temp.sum<-sum(temp.matrix)
+    temp.matrix2<-temp.matrix/temp.sum
+    summary.table<-rbind(summary.table,as.matrix(paste(temp.matrix,"(",round(temp.matrix2,digits=2),")",sep="")))
+    rownames(summary.table)[(nrow(summary.table)-nrow(temp.matrix)+1):nrow(summary.table)]<-rownames(temp.matrix)
+}
+
+colnames(summary.table)[1]<-"Stage I"
+
+
+temp.names<-union(rownames(summary.table.total),rownames(summary.table))
+temp<-matrix("",nrow=length(temp.names),ncol=2)
+rownames(temp)<-temp.names
+temp[rownames(summary.table.total),1]<-summary.table.total[,1]
+temp[rownames(summary.table),2]<-summary.table[,1]
+summary.table.total<-temp
+
+
+summary.table<-character()
+
+for(i in 1:length(var.names)){
+  
+    temp.matrix<-as.matrix(table(ct.matrix[lymphonly.id,var.names[i]]))
+    rownames(temp.matrix)<-paste(var.names[i]," - ",rownames(temp.matrix))
+    
+    temp.sum<-sum(temp.matrix)
+    temp.matrix2<-temp.matrix/temp.sum
+    summary.table<-rbind(summary.table,as.matrix(paste(temp.matrix,"(",round(temp.matrix2,digits=2),")",sep="")))
+    rownames(summary.table)[(nrow(summary.table)-nrow(temp.matrix)+1):nrow(summary.table)]<-rownames(temp.matrix)
+}
+
+colnames(summary.table)[1]<-"Lymph only"
+
+
+temp.names<-union(rownames(summary.table.total),rownames(summary.table))
+temp<-matrix("",nrow=length(temp.names),ncol=3)
+rownames(temp)<-temp.names
+temp[rownames(summary.table.total),1]<-summary.table.total[,1]
+temp[rownames(summary.table.total),2]<-summary.table.total[,2]
+temp[rownames(summary.table),3]<-summary.table[,1]
+
+summary.table.total<-temp
+
+colnames(summary.table.total)<-c("overlap","Stage 1 only","Lymph only")
+
+
+# calculate the p values to assess the differences between the three groups of patients for each trait
+
+pvalue.vect<-numeric()
+
+for(i in 1:length(var.names)){
+  
+    temp.matrix<-as.matrix(table(ct.matrix[c(overlap.id,stage1only.id,lymphonly.id),var.names[i]]))
+    rownames(temp.matrix)<-paste(var.names[i]," - ",rownames(temp.matrix))
+    
+    temp1<-ct.matrix[c(overlap.id,stage1only.id,lymphonly.id),var.names[i]]
+    temp2<-c(rep("overlap",length(overlap.id)),rep("stage1",length(stage1only.id)),rep("lymph",length(lymphonly.id)))
+    temp.index<-1:length(temp1)
+    temp.index<-temp.index[!(is.na(temp1) | is.na(temp2))]
+    temp1<-temp1[temp.index]
+    temp2<-temp2[temp.index]
+    
+    if(length(unique(temp1))==1){
+      pvalue.vect<-c(pvalue.vect, rep(1,length(unique(temp1))))
+      names(pvalue.vect)[length(pvalue.vect)]<-rownames(temp.matrix)
+    }else{
+      pvalue.vect<-c(pvalue.vect, rep(chisq.test(temp1,as.factor(temp2))$p.value,length(unique(temp1))))  
+      names(pvalue.vect)[(length(pvalue.vect)-length(unique(temp1))+1):length(pvalue.vect)]<-rownames(temp.matrix)
+    }
+}
+
+summary.table.total<-cbind(summary.table.total,pvalue.vect[rownames(summary.table.total)])
+colnames(summary.table.total)[4]<-"p value"
+
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted/gradsid_overlap_nonoverlap_ctfeatures.xlsx")
+write.xlsx(summary.table.total,file=output.filepath,row.names=T,col.names=T,append=F)
+```
+
+
+We also generated the GSEA input files for three three groups of patients using the function we wrote.
+```{r}
+
+# output the merged clinical data matrix as a txt file
+clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+output.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+write.table(clinic.matrix,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F,append=F)
+
+
+# note this function is slightly different for DESeq2 Norm data and the TPM matrix
+my_gsea_filecreate_binary<-function(fpkm.filepath,clinic.filepath,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
+  #####################################################################################################################################################
+  # Arguments:
+  # 
+  # gexp.filepath is the file path of the TPM matrix with first 5 columns being annotation for genes 
+  # (TPM_baseline_276_clean_celldiffadjusted_withannot.txt).
+  # 
+  # clinic.filpath is the file path of the clinic data (clinic_matrix_merged.txt). The first row needs to be the column names.
+  # 
+  # var.names is a vector containing the names of columns in clinic.filepath that you want to generate the phenotype file for.
+  #
+  # group1.values is a data.frame of string describing values of var.names that are considered as gorup 1. 
+  # For example, group1.values=data.frame(PHENGRP="nonacute Stage I untreated"). Note that the columns in group1.values need to match those in var.names if there are
+  # more than 1 variable to define the groups.
+  #
+  # group2.values has the same format as group1.values but is the settings for group2.
+  #
+  # group1.name is the name you want to call your group1 in the cls file.
+  #
+  # group2.name is the name you want to call your group2 in the cls file.
+  # 
+  # output.dir is the folder name where you want to save the created files.
+  #
+  # suffix.name is the suffix name in the name of the output files. The gct file will be named as gct_suffix.name.gct and cls file will be named as
+  # cls_suffix.name.gct. For example, if suffix.name="test", the gct file will be named "gct_test.gct" and the cls file will be named as 
+  # "cls_test.cls".
+  # 
+  # Value:
+  #
+  # This function will return 0 if successfully ran. Otherwise, it will return 1. If unsuccessful, information regarding what went wrong will be spit 
+  # out as warning messages.
+  #
+  # When ran successfully, this function will create two files under the specified output.dir named gct_var.name.gct and cls_var.name.cls, where 
+  # var.name will be the speficied value 
+  # in the argument. These two files can be directly loaded into GSEA together with another gene set file that needs to be generated outside of this 
+  # function.
+  #####################################################################################################################################################
+  
+  #  generate the gene expression matrix input file for GSEA
+  #fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+  #clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+  #output.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes"
+  # suffix.name<-"analysis1"
+  
+  
+  # load in the fpkm matrix
+  fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+  fpkm.matrix.anno<-fpkm.matrix[,1:6]
+  fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
   
   # load in the clinical data and subset the samples to those listed in the fpkm.matrix
   clinic.matrix=read.table(clinic.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F)
@@ -342,58 +1064,42 @@ fpkm.file=file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg
 clinic.file<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
 output.folder<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes_DESeq2_log2adjusted"
 
-# generate the files for analysis 1
-varnames<-c("PHENGRP")
+# generate the files for analysis 9: overlapped patients
+varnames<-c("PHENGRP","nodule_lymph_pheno")
 my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           clinic.filepath = clinic.file,
                           var.names = varnames,
-                          group1.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated")),
-                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage IV, untreated")),
+                          group1.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated"),nodule_lymph_pheno=c("lymph")),
+                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage II-III, untreated","Stage II-III, untreated","Stage IV, untreated","Stage IV, untreated","Stage IV, untreated"),nodule_lymph_pheno=c("lymph","micronodule","both","lymph","micronodule","both")),
                           output.dir=output.folder,
-                          suffix.name="analysis1"
+                          suffix.name="analysis9"
                           )
 
-# generate the files for analysis 2
-varnames<-c("PHENGRP")
+# generate the files for analysis 10: Stage I only
+varnames<-c("PHENGRP","nodule_lymph_pheno")
 my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           clinic.filepath = clinic.file,
                           var.names = varnames,
-                          group1.values = data.frame(PHENGRP=c("Remitting, untreated")),
-                          group2.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated","Stage II-III, untreated","Stage IV, untreated")),
+                          group1.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated","Non-acute, Stage I, untreated"),nodule_lymph_pheno=c("micronodule","both")),
+                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage II-III, untreated","Stage II-III, untreated","Stage IV, untreated","Stage IV, untreated","Stage IV, untreated"),nodule_lymph_pheno=c("lymph","micronodule","both","lymph","micronodule","both")),
                           output.dir=output.folder,
-                          suffix.name="analysis2"
+                          suffix.name="analysis10"
                           )
 
-# generate the files for analysis 3
-varnames<-c("PHENGRP")
+# generate the files for analysis 11: lymph only (no stage I)
+varnames<-c("PHENGRP","nodule_lymph_pheno")
+phen.value<-c("Non-acute, Stage I, untreated","Cardiac defining therapy","Stage IV, treated","Stage IV, untreated","Stage II-III, untreated","Remitting, untreated","Multi-organ", "Stage II-III, treated","Acute Sarcoidosis, untreated")
+phen.value<-setdiff(phen.value,"Non-acute, Stage I, untreated")
+
 my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
                           clinic.filepath = clinic.file,
                           var.names = varnames,
-                          group1.values = data.frame(PHENGRP=c("Stage IV, untreated")),
-                          group2.values = data.frame(PHENGRP=c("Non-acute, Stage I, untreated","Stage II-III, untreated")),
+                          group1.values = data.frame(PHENGRP=phen.value,nodule_lymph_pheno=rep("lymph",length(phen.value))),
+                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated","Stage II-III, untreated","Stage II-III, untreated","Stage IV, untreated","Stage IV, untreated","Stage IV, untreated"),nodule_lymph_pheno=c("lymph","micronodule","both","lymph","micronodule","both")),
                           output.dir=output.folder,
-                          suffix.name="analysis3"
-                          )
-# generate the files for analysis 4. If we directly specify group1.values using numbers, it won't work. I had to specify them to be a space+number as a character.
-varnames<-c("nodule_lymph_pheno","steroid_atv1","dmard_atv1")
-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
-                          clinic.filepath = clinic.file,
-                          var.names = varnames,
-                          group1.values = data.frame(nodule_lymph_pheno=c("lymph"),steroid_atv1=c(" 0"),dmard_atv1=c(" 0")),
-                          group2.values = data.frame(nodule_lymph_pheno=c("micronodule","both"),steroid_atv1=c(" 0"," 0"),dmard_atv1=c(" 0"," 0")),
-                          output.dir=output.folder,
-                          suffix.name="analysis4"
+                          suffix.name="analysis11"
                           )
 
-# generate the files for analysis 5. 
-varnames<-c("PHENGRP")
-my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
-                          clinic.filepath = clinic.file,
-                          var.names = varnames,
-                          group1.values = data.frame(PHENGRP=c("Remitting, untreated")),
-                          group2.values = data.frame(PHENGRP=c("Stage II-III, untreated")),
-                          output.dir=output.folder,
-                          suffix.name="analysis5"
-                          )
 
 ```
+
