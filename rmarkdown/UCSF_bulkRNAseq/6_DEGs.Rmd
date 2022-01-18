@@ -1,0 +1,461 @@
+---
+title: "EdgeR on bulk RNAseq data"
+author: "Xiting Yan"
+date: "05/25/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+
+knitr::knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+home.dir<-"/home/yanxiting/driver_Grace"
+work.dir<-file.path(home.dir,"scratch","Shervin")
+my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
+```
+
+
+# Background
+
+For Shervin's data, we found that the Ribo depletion protocol and the PolyA enrichment protocol has a huge difference in the generated data. So we decided to identify the differentially expressed genes within each protocol first. Especially, in this project, we wanted to identify differentially expressed genes:
+
+* DEGs between smokers and non-smokers
+* DEGs between paired tumor and normal samples
+
+The sample size of this study is toward the low end and it includes two different protocols, which usually would generate very different data. So before any analysis, we take a look at the breakdown of samples between the two protocols (polyA and RiboD), smoking status (never, former and current) and disease (normal and tumor). Note that each subject has both normal and tumor. 
+
+```{r}
+############################################
+# 2. load in the phenotype data that contain the group and covariate info
+pheno.filepath<-"/home/yanxiting/driver_Grace/scratch/Shervin/pheno_data/phenotype_updated.txt"
+pheno.matrix<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+# add the subject ID column
+temp.vect<-sapply(pheno.matrix[,1],my.element.remove,splitchar="",index=-1)
+pheno.matrix<-cbind(pheno.matrix,temp.vect)
+colnames(pheno.matrix)[ncol(pheno.matrix)]<-"Subject"
+
+
+cat("Breakdown of disease and protocols:\n")
+table(pheno.matrix$Subject,pheno.matrix$Protocol)
+
+cat("Breakdown of smoking status and protocols:\n")
+table(pheno.matrix$Smoker,pheno.matrix$Protocol)
+
+```
+
+## Observations
+Based on our breakdown tables, we have the following observations:
+
+* There's no subject with normal and tumor in different protocols.
+* In polyA protocol, there are 1:1:3 subjects from current:former:never which makes the comparison between different smoking status difficult.
+* In RiboD protocol, there are 2:2:0 subjects from current:former:never so comparison between current and former smokers is reasonable but with only 2 subjects per smoking status.
+
+```{r data_loading}
+library(edgeR)
+############################################
+# 1. load in the gene expression data
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+data.filepath<-file.path(home.dir,"scratch/Shervin/rawcounts_all.txt")
+output.dir<-file.path(home.dir,"scratch/Shervin/edgeR")
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+#count.matrix <- read.delim(data.filepath,row.names="GeneID")
+count.matrix<-read.table(data.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+
+############################################
+# 2. load in the phenotype data that contain the group and covariate info
+pheno.filepath<-"/home/yanxiting/driver_Grace/scratch/Shervin/pheno_data/phenotype_updated.txt"
+pheno.matrix<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+
+# add the subject ID column
+temp.vect<-sapply(pheno.matrix[,1],my.element.remove,splitchar="",index=-1)
+pheno.matrix<-cbind(pheno.matrix,temp.vect)
+colnames(pheno.matrix)[ncol(pheno.matrix)]<-"Subject"
+
+# match the gene expression data and phenotype data
+count.matrix<-count.matrix[,pheno.matrix[,1]]
+
+```
+
+# EdgeR DEG analysis (protocols)
+We identify the differentially expressed genes between polyA and RiboD protocols using all samples.
+```{r}
+group<-factor(pheno.matrix[,"Protocol"],levels=c("PolyA","RiboD"))
+y <- DGEList(counts=as.data.frame(count.matrix),group=group,genes=annot.matrix,samples=pheno.matrix)
+keep <- filterByExpr(y,group=group)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+
+#subject<-factor(pheno.matrix[,"Subject"])
+design.matrix <- model.matrix(~group)
+
+y <- estimateDisp(y,design.matrix)
+# to perform quasi-likelihood F-tests:
+fit <- glmQLFit(y,design=design.matrix)
+qlf <- glmQLFTest(fit)
+#topTags(qlf)
+
+# save the results into rds file
+cmd.out<-cbind(qlf$genes,qlf$table)
+fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
+cmd.out<-cbind(cmd.out,fdr.vect)
+colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
+output.filepath<-file.path(output.dir,"DEGs_all_polyA_vs_riboD.rds")
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+
+protocol.qlf<-qlf
+protocol.degs<-cmd.out
+cat("Here're the numbers of significant genes (FDR<0.05):\n")
+summary(decideTests(qlf))
+plotMD(qlf)
+
+```
+
+## Observations
+
+* There is a big difference bewteen the two protocols which was also observed on the PCA plot of all samples labelled using protocol.
+
+# EdgeR DEG analysis (all_tumor vs normal)
+We identify the differentially expressed genes between normal and tumor tissues in the same subject using the paired test by edgeR.
+
+```{r}
+############################################
+# 3. load in the phenotype data that contain the group and covariate info
+#    identify the DEGs between tumor and normal by considering the data as paired data.
+#group <- factor(c(1,1,2,2))
+group<-factor(pheno.matrix[,"disease"],levels=c("normal","tumor"))
+y <- DGEList(counts=as.data.frame(count.matrix),group=group,genes=annot.matrix,samples=pheno.matrix)
+keep <- filterByExpr(y,group=group)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+
+subject<-factor(pheno.matrix[,"Subject"])
+design.matrix <- model.matrix(~ subject + group)
+
+y <- estimateDisp(y,design.matrix)
+# to perform quasi-likelihood F-tests:
+fit <- glmQLFit(y,design=design.matrix)
+qlf <- glmQLFTest(fit)
+#topTags(qlf)
+
+############################################
+# 4. output the results and the significant genes
+cmd.out<-cbind(qlf$genes,qlf$table)
+fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
+cmd.out<-cbind(cmd.out,fdr.vect)
+colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
+output.filepath<-file.path(output.dir,"DEGs_all_tumor_vs_normal_paired.rds")
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+
+disease.qlf.all<-qlf
+disease.degs.all<-cmd.out
+cat("Here're the numbers of significant genes (FDR<0.05):\n")
+summary(decideTests(qlf))
+plotMD(qlf)
+```
+
+The p values and FDRs of all genes were saved in "DEGs_all_tumor_vs_normal_paired.rds".
+
+## Overlap with protocol DEGs
+We compared the DEGs between tumor and normal and the DEGs between the two protocols.
+
+```{r}
+library(eulerr)
+set.seed(1)
+
+set1 <- paste0(protocol.degs[,"GeneID"],"_",protocol.degs[,"Chr"])[protocol.degs$FDR<0.05]
+set2 <- paste0(disease.degs.all[,"GeneID"],"_",disease.degs.all[,"Chr"])[disease.degs.all$FDR<0.05]
+
+x<-list(set1,set2)
+names(x)<-c("Protocol","Disease_all")
+plot(euler(x,shape="ellipse"), quantities = TRUE)
+```
+
+# EdgeR DEG analysis (PolyA_tumor vs normal)
+We identify the differentially expressed genes between normal and tumor tissues in the same subject using the paired test by edgeR on the polyA protocol samples only.
+
+```{r}
+# extract only polyA samples
+my.count.matrix<-count.matrix[,pheno.matrix[,"Protocol"]=="PolyA"]
+my.pheno.matrix<-pheno.matrix[pheno.matrix[,"Protocol"]=="PolyA",]
+
+############################################
+# 3. load in the phenotype data that contain the group and covariate info
+#    identify the DEGs between tumor and normal by considering the data as paired data.
+#group <- factor(c(1,1,2,2))
+group<-factor(my.pheno.matrix[,"disease"],levels=c("normal","tumor"))
+y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
+keep <- filterByExpr(y,group=group)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+
+subject<-factor(my.pheno.matrix[,"Subject"])
+design.matrix <- model.matrix(~ subject + group)
+
+y <- estimateDisp(y,design.matrix)
+# to perform quasi-likelihood F-tests:
+fit <- glmQLFit(y,design=design.matrix)
+qlf <- glmQLFTest(fit)
+#topTags(qlf)
+
+############################################
+# 4. output the results and the significant genes
+cmd.out<-cbind(qlf$genes,qlf$table)
+fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
+cmd.out<-cbind(cmd.out,fdr.vect)
+colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
+
+output.filepath<-file.path(output.dir,"DEGs_polyA_tumor_vs_normal_paired.rds")
+#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+
+summary(decideTests(qlf))
+plotMD(qlf)
+disease.degs.polya<-cmd.out
+disease.qlf.polya<-qlf
+```
+
+The p values and FDRs of all genes were saved in "DEGs_polyA_tumor_vs_normal_paired.txt".
+
+
+# EdgeR DEG analysis (RiboD_tumor vs normal)
+We identify the differentially expressed genes between normal and tumor tissues in the same subject using the paired test by edgeR on the Ribo0 protocol samples only.
+
+```{r}
+# These codes were run on the workstation
+# extract only polyA samples
+my.count.matrix<-count.matrix[,pheno.matrix[,"Protocol"]=="RiboD"]
+my.pheno.matrix<-pheno.matrix[pheno.matrix[,"Protocol"]=="RiboD",]
+
+############################################
+# 3. load in the phenotype data that contain the group and covariate info
+#    identify the DEGs between tumor and normal by considering the data as paired data.
+#group <- factor(c(1,1,2,2))
+group<-factor(my.pheno.matrix[,"disease"],levels=c("normal","tumor"))
+y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
+keep <- filterByExpr(y,group=group)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+
+subject<-factor(my.pheno.matrix[,"Subject"])
+design.matrix <- model.matrix(~ subject + group)
+
+y <- estimateDisp(y,design.matrix)
+# to perform quasi-likelihood F-tests:
+fit <- glmQLFit(y,design=design.matrix)
+qlf <- glmQLFTest(fit)
+#topTags(qlf)
+
+############################################
+# 4. output the results and the significant genes
+cmd.out<-cbind(qlf$genes,qlf$table)
+fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
+cmd.out<-cbind(cmd.out,fdr.vect)
+colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
+
+output.filepath<-file.path(output.dir,"DEGs_RiboD_tumor_vs_normal_paired.rds")
+#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+
+summary(decideTests(qlf))
+plotMD(qlf)
+
+disease.degs.ribod<-cmd.out
+disease.qlf.ribod<-qlf
+```
+
+The p values and FDRs of all genes were saved in "DEGs_RiboD_tumor_vs_normal_paired.txt".
+
+## Overlap with other DEGs
+We compared the DEGs between tumor and normal based on all samples and polyA only samples and the DEGs between the two protocols.
+
+```{r}
+library(eulerr)
+set.seed(1)
+
+set1 <- paste0(protocol.degs[,"GeneID"],"_",protocol.degs[,"Chr"])[protocol.degs$FDR<0.05]
+set2 <- paste0(disease.degs.all[,"GeneID"],"_",disease.degs.all[,"Chr"])[disease.degs.all$FDR<0.05]
+set3 <- paste0(disease.degs.ribod[,"GeneID"],"_",disease.degs.ribod[,"Chr"])[disease.degs.ribod$FDR<0.05]
+
+x<-list(set1,set2,set3)
+names(x)<-c("Protocol","Disease_all","Disease_RiboD")
+#plot(euler(x,shape="ellipse"), quantities = TRUE)
+plot(venn(x))
+```
+
+
+
+## Observations (disease DEGs)
+
+* The DEG analysis using all samples together is strongly affected by the differnece bewteen the two protocols although the comparison was done in a paired sample style and both tumor and normal samples were from the same protocols so that the protocol effect is already controlled.
+
+* No DEGs were identified in PolyA protocol between tumor and normal while within the RiboD, some DEGs were identified with a larger overlap with DEGs from disease_all. This indiciates that the DEGs from Disease_RiboD is more reliable.
+
+* Potentially, we can also run Combat-RNAseq to remove the batch effect and then identify DEGs from the batch corrected data.
+
+
+# EdgeR DEG analysis (RiboD_current vs former smokers)
+We identify the differentially expressed genes between current and former smokers in tumor and normal separately using the RiboD samples. There are not enough samples for this comparison within the polyA samples.
+
+## Normal only
+First, we identify DEGs within normal samples only. There are only two samples within each group.
+```{r}
+# These codes were run on the workstation
+# extract the normal samples only
+my.count.matrix<-count.matrix[,pheno.matrix$disease=="normal" & pheno.matrix$Protocol=="RiboD"]
+my.pheno.matrix<-pheno.matrix[pheno.matrix$disease=="normal" & pheno.matrix$Protocol=="RiboD",]
+
+# never vs current comparison
+############################################
+# 3. load in the phenotype data that contain the group and covariate info
+#    identify the DEGs between tumor and normal by considering the data as paired data.
+#group <- factor(c(1,1,2,2))
+group<-factor(my.pheno.matrix[,"Smoker"],levels=c("former","current"))
+y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
+keep <- filterByExpr(y,group=group)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+
+#subject<-factor(pheno.matrix[,"Subject"])
+design.matrix <- model.matrix(~ group)
+
+y <- estimateDisp(y,design.matrix)
+# to perform quasi-likelihood F-tests:
+fit <- glmQLFit(y,design=design.matrix)
+qlf <- glmQLFTest(fit)
+#topTags(qlf)
+
+############################################
+# 4. output the results and the significant genes
+cmd.out<-cbind(qlf$genes,qlf$table)
+fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
+cmd.out<-cbind(cmd.out,fdr.vect)
+colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
+
+output.filepath<-file.path(output.dir,"DEGs_RiboD_current_vs_former_normal.rds")
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
+
+summary(decideTests(qlf))
+plotMD(qlf)
+
+smoker.degs.ribod.normal<-cmd.out
+smoker.qlf.ribod.normal<-qlf
+
+cat("There are ", sum(smoker.degs.ribod.normal$PValue<0.05 & abs(smoker.degs.ribod.normal$logFC)>log(2,base=exp(1)))," DEGs with p value<0.05 and fold change>2.\n")
+```
+
+
+## Tumor only
+First, we identify DEGs within tumor samples only. There are only two samples within each group.
+```{r}
+# These codes were run on the workstation
+# extract the normal samples only
+my.count.matrix<-count.matrix[,pheno.matrix$disease=="tumor" & pheno.matrix$Protocol=="RiboD"]
+my.pheno.matrix<-pheno.matrix[pheno.matrix$disease=="tumor" & pheno.matrix$Protocol=="RiboD",]
+
+# never vs current comparison
+############################################
+# 3. load in the phenotype data that contain the group and covariate info
+#    identify the DEGs between tumor and normal by considering the data as paired data.
+#group <- factor(c(1,1,2,2))
+group<-factor(my.pheno.matrix[,"Smoker"],levels=c("former","current"))
+y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
+keep <- filterByExpr(y,group=group)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+
+#subject<-factor(pheno.matrix[,"Subject"])
+design.matrix <- model.matrix(~ group)
+
+y <- estimateDisp(y,design.matrix)
+# to perform quasi-likelihood F-tests:
+fit <- glmQLFit(y,design=design.matrix)
+qlf <- glmQLFTest(fit)
+#topTags(qlf)
+
+############################################
+# 4. output the results and the significant genes
+cmd.out<-cbind(qlf$genes,qlf$table)
+fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
+cmd.out<-cbind(cmd.out,fdr.vect)
+colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
+
+output.filepath<-file.path(output.dir,"DEGs_RiboD_current_vs_former_tumor.rds")
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
+
+summary(decideTests(qlf))
+plotMD(qlf)
+
+smoker.degs.ribod.tumor<-cmd.out
+smoker.qlf.ribod.tumor<-qlf
+
+cat("There are ", sum(smoker.degs.ribod.tumor$PValue<0.05 & abs(smoker.degs.ribod.tumor$logFC)>log(2,base=exp(1)))," DEGs with p value<0.05 and fold change>2.\n")
+```
+
+
+## Overlap between normal and tumor only
+We compared the DEGs between current and former smokers based on normal and tumor samples within the RiboD protocol.
+
+```{r}
+library(eulerr)
+set.seed(1)
+
+set1 <- paste0(smoker.degs.ribod.normal[,"GeneID"],"_",smoker.degs.ribod.normal[,"Chr"])[smoker.degs.ribod.normal$PValue<0.05 & smoker.degs.ribod.normal$logFC>log(2,base=exp(1))]
+set2 <- paste0(smoker.degs.ribod.tumor[,"GeneID"],"_",smoker.degs.ribod.tumor[,"Chr"])[smoker.degs.ribod.tumor$PValue<0.05 & smoker.degs.ribod.tumor$logFC>log(2,base=exp(1))]
+
+x<-list(set1,set2)
+names(x)<-c("smoker_normal_up","smoker_tumor_up")
+#plot(euler(x,shape="ellipse"), quantities = TRUE)
+plot(venn(x))
+```
+
+```{r}
+library(eulerr)
+set.seed(1)
+
+set1 <- paste0(smoker.degs.ribod.normal[,"GeneID"],"_",smoker.degs.ribod.normal[,"Chr"])[smoker.degs.ribod.normal$PValue<0.05 & smoker.degs.ribod.normal$logFC< -log(2,base=exp(1))]
+set2 <- paste0(smoker.degs.ribod.tumor[,"GeneID"],"_",smoker.degs.ribod.tumor[,"Chr"])[smoker.degs.ribod.tumor$PValue<0.05 & smoker.degs.ribod.tumor$logFC< -log(2,base=exp(1))]
+
+x<-list(set1,set2)
+names(x)<-c("smoker_normal_down","smoker_tumor_down")
+#plot(euler(x,shape="ellipse"), quantities = TRUE)
+plot(venn(x))
+```

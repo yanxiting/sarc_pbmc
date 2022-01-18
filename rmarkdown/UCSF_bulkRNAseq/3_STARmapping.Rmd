@@ -1,0 +1,177 @@
+---
+title: "FastQC on bulk RNAseq data"
+author: "Xiting Yan"
+date: "05/25/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+
+knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+```
+
+
+# Background
+
+In this note, we demonstrate how to use R to generate sh file to run [STAR](https://github.com/alexdobin/STAR) on a given list of fastq files to map the reads to human genome. There are two styles to run the jobs. 
+
+* Run STAR on different samples in parallele (style 1).
+* Run STAR on different samples in one thread (style 2).
+
+We have STAR 2.5.1 on grace HPC and used this version for this data processing.
+
+```
+/home/ysm/xiting_yan/xy48/scratch_kaminski/public/softwares/STAR-2.5.1b/bin/Linux_x86_64_static/STAR
+```
+
+# Build Genome Index
+We build the index file based on the read length. The original read length in this dataset was 101 bps. After the trimming, the read length was not equal but the longest read length is 101 bps. 
+
+# STAR indexing
+We generate the index file using the following command in terminal.
+```
+# we ran the index building on a computing node
+srun --pty -p pi_kaminski -t 12:00:00 --mem 120Gb bash
+STAR  --runMode genomeGenerate --runThreadN 20 --genomeDir /home/xy48/scratch/Shervin/STARIndex/ --genomeFastaFiles /home/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Sequence/WholeGenomeFasta/genome.fa --sjdbGTFfile /home/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-current/Genes/genes.gtf --sjdbOverhang 100
+```
+
+# Run STAR mapping
+
+This data is pair-end reads. We ran STAR on the grace HPC.
+
+```{r}
+# this chunck needs to be run on the HPC directly
+# There's only one fastq file for each end. Needs to be changed if there are multiple parts.
+home.dir<-"/home/xy48"
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+work.dir<-file.path(home.dir,"scratch/Shervin")
+data.dir<-file.path(work.dir,"results_cutadapt")
+star.index.dir<-file.path(work.dir,"STARIndex")
+sjdb.filepath<-"/home/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-current/Genes/genes.gtf"
+# In this data, each sample has a folder.
+sample.names<-list.files(data.dir)
+
+script.dir<-file.path(work.dir,"scripts_STAR")
+output.dir<-file.path(work.dir,"results_STAR")
+
+if(file.exists(script.dir)==F){
+  dir.create(script.dir)
+}
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+  file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(sample.names)){
+  data.subdir<-file.path(data.dir,sample.names[i])
+  output.subdir<-file.path(output.dir,sample.names[i])
+  if(file.exists(output.subdir)==F){
+    dir.create(output.subdir)
+  }
+
+  # get the list of folders under data.dir
+  fastq.filenames<-list.files(data.subdir,full.names = FALSE, recursive=FALSE)
+  fastq.filepath<-file.path(data.subdir,fastq.filenames)
+  jobname<-paste(my.element.extract(sample.names[i],splitchar="_",index=2))
+  
+  script.filepath<-file.path(script.dir,paste(jobname,".sh",sep=""))
+  
+  # We assume there's only one part
+  temp<-"#!/bin/bash\n"
+  temp<-paste0(temp,"#SBATCH --partition=pi_kaminski,day\n")
+  temp<-paste0(temp,"#SBATCH --job-name=",jobname,"\n")
+  temp<-paste0(temp,"#SBATCH --nodes=1 --cpus-per-task=10 --mem=40Gb\n")
+  temp<-paste0(temp,"#SBATCH --time=1-00:00:00\n")
+  temp<-paste0(temp,"#SBATCH --mail-type=NONE\n")
+  temp<-paste0(temp,"#SBATCH --error=",script.filepath,".e%J\n","#SBATCH --output=",script.filepath,".o%J","\n",sep="")
+
+  # If there are multiple fastq files for each end, after --readFilesIn concatenate them using ,
+  #cmd.out<-paste(cmd.out,"STAR --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --outSAMprimaryFlag AllBestScore --bamRemoveDuplicatesType UniqueIdentical --outSAMstrandField intronMotif --outFilterIntronMotifs RemoveNoncanonical --runThreadN 10 --genomeDir ",star.index.dir," --sjdbGTFfile ",sjdb.filepath," --sjdbOverhang 100 --twopassMode Basic"," --readFilesIn ",paste(filenames.1,collapse=",",sep="")," ",paste(filenames.2,collapse=",",sep="")," --outFileNamePrefix ",file.path(output.subdir,sample.names[i]),sep="")
+  temp<-paste(temp,"STAR --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --outSAMprimaryFlag AllBestScore --bamRemoveDuplicatesType UniqueIdentical --outSAMstrandField intronMotif --outFilterIntronMotifs RemoveNoncanonical --runThreadN 10 --genomeDir ",star.index.dir," --sjdbGTFfile ",sjdb.filepath," --sjdbOverhang 100 --twopassMode Basic"," --readFilesIn ",fastq.filepath[1]," ",fastq.filepath[2]," --outFileNamePrefix ",file.path(output.subdir,sample.names[i]),sep="")
+
+  cat(temp,file=script.filepath,append=F)
+  cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+#system(paste("nohup ",script.filepath," > ",log.filepath," &",sep=""))
+```
+
+
+We submit all the jobs by typing `jobsub.bat` in the terminal. 
+
+
+# Generate mapping summary table
+We generate a summary of the mapping results on the STAR output files.
+
+
+```{r}
+# These codes were run directy on the HPC
+rm(list=ls())
+source("/home/xy48/Rprogram/my_functions.R")
+work.dir<-"/home/xy48/scratch/Shervin"
+data.dir<-file.path(work.dir,"results_STAR")
+output.filepath<-file.path(work.dir,"STAR_mapping_summary.txt")
+
+file.names<-list.files(data.dir)	
+sample.names<-unname(sapply(file.names,my.element.extract,splitchar="_",index=2))
+star.matrix<-numeric()
+for(i in 1:length(file.names)){
+    filepath<-list.files(file.path(data.dir,file.names[i]))
+    filepath<-filepath[grep(".final.",filepath)]
+    filepath<-file.path(data.dir,file.names[i],filepath)
+    
+    temp<-readLines(filepath)
+    temp.vect<-as.numeric(my.element.extract(temp[6],splitchar="\t",index=-1))
+    temp.vect<-c(temp.vect,as.numeric(my.element.extract(temp[9],splitchar="\t",index=-1)))
+    temp.vect<-c(temp.vect,as.numeric(my.element.extract(temp[24],splitchar="\t",index=-1)))
+    star.matrix<-rbind(star.matrix,temp.vect)
+}
+
+rownames(star.matrix)<-sample.names
+colnames(star.matrix)<-c("total","mapped_unique","mapped_multi")
+star.matrix<-star.matrix*2
+star.matrix<-cbind(star.matrix,star.matrix[,2]/star.matrix[,1])
+star.matrix<-cbind(rownames(star.matrix),star.matrix)
+colnames(star.matrix)<-c("sample_names","total","mapped_unique","mapped_multi","unique_maprate")
+
+write.table(star.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+```
+

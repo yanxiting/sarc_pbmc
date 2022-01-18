@@ -1,0 +1,225 @@
+---
+title: "FastQC on bulk RNAseq data"
+author: "Xiting Yan"
+date: "05/25/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+
+knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+```
+
+
+# Background
+
+In this note, we demonstrate how to run [TPMcalculator](https://github.com/ncbi/TPMCalculator) on STAR ouptut files to calculate the TPM matrix. 
+
+We have installed TPMCalculator 0.0.3 on grace HPC and used this version for this data processing. Some modules had to be upgraded using the following commands.
+
+```
+module restore tpmcalculator
+module load miniconda/4.9.2
+module load CMake/3.10.2-GCCcore-6.4.0
+module save tpmcalculator
+```
+
+# Calculate TPMs
+First, we calculate the TPMs for each sample separately.
+```{r}
+# These codes need to be run directly on grace HPC.
+star.dir<-"/home/xy48/scratch/Shervin/results_STAR"
+gtf.filepath<-"/home/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-current/Genes/genes.gtf"
+folder.names<-list.files(star.dir)
+work.dir<-"/home/xy48/scratch/Shervin"
+source("~/Rprogram/my_functions.R")
+
+
+output.dir<-file.path(work.dir,"results_TPMcalculator_hg38")
+script.dir<-file.path(work.dir,"scripts_TPMcalculator_hg38")
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+if(file.exists(script.dir)==F){
+  dir.create(script.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+  file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(folder.names)){
+
+  temp.name<-my.element.extract(folder.names[i],splitchar="_",index=2)
+  
+  output.subdir<-file.path(output.dir,temp.name)
+  if(file.exists(output.subdir)==F){
+    dir.create(output.subdir)
+  }
+  
+  script.filepath<-file.path(script.dir,paste(temp.name,".sh",sep=""))
+  bam.filepath<-list.files(file.path(star.dir,folder.names[i]))
+  bam.filepath<-bam.filepath[grep("Aligned.sortedByCoord.out.bam",bam.filepath)]
+  bam.filepath<-file.path(star.dir,folder.names[i],bam.filepath)
+  #bam.filepath<-file.path(star.dir,folder.names[i],"Final.STARBowtie2.bam")
+  cmd.out<-"#!/bin/bash\n#SBATCH --partition=day,pi_kaminski\n#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1\n#SBATCH --mem=49152\n#SBATCH --time=24:00:00\n#SBATCH --mail-type=NONE\n"
+  cmd.out<-paste(cmd.out,"#SBATCH --job-name=",temp.name,"\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --error=",script.filepath,".e%J\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --output=",script.filepath,".o%J\n",sep="")
+  cmd.out<-paste(cmd.out,"module restore tpmcalculator\n",sep="")
+  cmd.out<-paste(cmd.out,"conda activate rnaseq\n",sep="")
+  cmd.out<-paste(cmd.out,"cd ",output.subdir,"\n",sep="")
+  cmd.out<-paste(cmd.out,"TPMCalculator -g ",gtf.filepath," -b ",bam.filepath,"\n",sep="")
+  cat(cmd.out,file=script.filepath,append=F)
+  
+  cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+  system(paste("chmod 700 ",script.filepath,"\n",sep=""))
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+
+```
+
+
+Second, we merge the TPMs into matrix.
+```{r}
+# These codes need to be run on the grace HPC directly.
+####################################
+# 1. merge the results of TPMs into one big matrix from individual samples
+source("~/Rprogram/my_functions.R")
+output.filepath<-"/home/xy48/scratch/Shervin/TPM_all.txt"
+data.dir<-"/home/xy48/scratch/Shervin/results_TPMcalculator_hg38"
+filenames<-list.files(data.dir)
+
+###############################
+# load in the IDs that need to be switched with each other
+sample.names<-filenames
+gene.names<-character()
+result.list<-list()
+annot.matrix<-character()
+
+for(i in 1:length(filenames)){
+cat("i=",i,"\n",sep="")
+# check if this sample needs to be corrected or not.
+#data.filepath<-file.path(data.dir,filenames[i],"Final.STARBowtie2_genes.out")
+data.filepath<-list.files(file.path(data.dir,filenames[i]))
+temp<-sapply(data.filepath,my.element.extract,splitchar="\\.",index=-1)
+data.filepath<-data.filepath[temp=="out"]
+data.filepath<-file.path(data.dir,filenames[i],data.filepath)
+
+temp<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
+rownames(temp)<-paste(temp[,2],":",temp[,1],sep="")
+result.list[[i]]<-temp
+
+temp.names<-setdiff(rownames(temp),gene.names)
+annot.matrix<-rbind(annot.matrix,temp[temp.names,1:5])
+gene.names<-union(gene.names,rownames(temp))
+}
+
+names(result.list)<-sample.names
+
+# generate the TPM matrix
+count.table<-numeric()
+for(i in 1:length(result.list)){
+  count.table<-cbind(count.table,result.list[[i]][gene.names,7])
+}
+count.table[is.na(count.table)]<-0
+colnames(count.table)<-sample.names
+
+
+rownames(annot.matrix)<-paste(annot.matrix[,2],":",annot.matrix[,1],sep="")
+cmd.out<-cbind(annot.matrix[gene.names,],count.table)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+
+####################################
+# generate the log(TPM+1,base=2)
+output.filepath<-"/home/xy48/scratch/Shervin/log2TPM_all.txt"
+cmd.out<-cbind(annot.matrix[gene.names,],log(count.table+1,base=2))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+
+```
+
+# Generate Raw Count Matrix
+First, generate the raw read count matrix for all samples.
+```{r}
+# These codes can be run both on a workstation or on grace HPC. It only takes one single thread.
+library(Rsubread)
+library(edgeR)
+source("~/Rprogram/my_functions.R")
+
+output.dir<-"/home/xy48/scratch/Shervin/results_rawcounts_hg38"
+tophat.dir<-"/home/xy48/scratch/Shervin/results_STAR"
+output.filepath<-"/home/xy48/scratch/Shervin/rawcounts_all.txt"
+
+###############################
+# load in the IDs that need to be switched with each other
+dir.list<-list.files(tophat.dir)
+dir.samplenames<-unname(sapply(dir.list,my.element.extract,splitchar="_",index=2))
+count.table<-numeric()
+result.dirs<-dir.list
+
+for(j in 1:length(result.dirs)){
+
+sample.name<-dir.samplenames[j]
+#bam.filepath<-file.path(tophat.dir,result.dirs[j],"Final.STARBowtie2.bam")
+bam.filepath<-list.files(file.path(tophat.dir,result.dirs[j]))
+bam.filepath<-bam.filepath[grep("Aligned.sortedByCoord.out.bam",bam.filepath)]
+bam.filepath<-file.path(tophat.dir,result.dirs[j],bam.filepath)
+
+temp<-featureCounts(bam.filepath,annot.inbuilt="hg38",annot.ext="/home/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-current/Genes/genes.gtf",isGTFAnnotationFile=T,GTF.featureType="exon",GTF.attrType="gene_id",useMetaFeatures=T,allowMultiOverlap=T,nthreads=1,countMultiMappingReads=T)
+
+
+if(j==1){
+anno.matrix<-temp$annotation
+count.table<-cbind(count.table,temp$counts)
+gene.names<-anno.matrix[,1]
+}else{
+count.table<-cbind(count.table,temp$counts[gene.names,])
+}
+}
+
+colnames(count.table)<-dir.samplenames
+
+cmd.out<-cbind(anno.matrix,count.table)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+```
+
+
+

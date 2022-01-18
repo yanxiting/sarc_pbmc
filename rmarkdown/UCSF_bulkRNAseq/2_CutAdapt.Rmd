@@ -1,0 +1,314 @@
+---
+title: "FastQC on bulk RNAseq data"
+author: "Xiting Yan"
+date: "05/25/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+
+knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+```
+
+
+# Background
+
+In this note, we demonstrate how to use R to generate sh file to run [Cutadapt](https://cutadapt.readthedocs.io/en/stable/index.html) on a given list of fastq files to trim off polyA tails and illumina adapters. There are two styles to run the jobs. 
+* Run cutadapt on different samples in parallele (style 1).
+* Run cutadapt on different samples in one thread (style 2).
+
+We installed Cutadapt on a linux workstation using python3.7.2.
+
+We load python3.6.6 on grace HPC and install cutadapt using 
+```
+module load miniconda/4.9.2
+conda create -n cutadaptenv cutadapt
+
+# We also tried to install cutadapt through pip but failed.
+module load CGAL/4.11.1-foss-2018b-Python-3.6.6
+python3 -m pip install --user --upgrade cutadapt
+```
+
+Based on what type of adapter sequences exist, you'll need to put different adapter sequences for  trimming. Here are [some examples](https://support.illumina.com/content/dam/illumina-support/help/Illumina_DRAGEN_Bio_IT_Platform_v3_7_1000000141465/Content/SW/Informatics/Dragen/FastQC_Adapter_Kmer_files_fDG.htm):
+
+* Illumina Universal Adapter—AGATCGGAAGAG
+*	Illumina Small RNA 3' Adapter—TGGAATTCTCGG
+*	Illumina Small RNA 5' Adapter—GATCGTCGGACT
+*	Nextera Transposase Sequence—CTGTCTCTTATA
+
+# Cutadapt
+Since each Cutadapt won't take too much time, when there are not so many samples, it is more convenient for us to run FastQC on different samples in one single thread on a workstation. 
+
+```{r}
+# this chunck needs to be run on the HPC directly
+home.dir<-"/home/xy48"
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+work.dir<-file.path(home.dir,"scratch/Shervin")
+
+# In this data, each sample has a folder but there are two batches of samples. Each batch of samples reside under the same folder. So there are two layers of folders under data.
+data.dir.list<-list.dirs(file.path(work.dir,"data",list.files(file.path(work.dir,"data"))),full.names = T,recursive = FALSE)
+sample.names<-unname(sapply(data.dir.list,my.element.extract,splitchar="/",index=-1))
+
+script.dir<-file.path(work.dir,"scripts_cutadapt")
+output.dir<-file.path(work.dir,"results_cutadapt")
+
+if(file.exists(script.dir)==F){
+  dir.create(script.dir)
+}
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+  file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(data.dir.list)){
+  data.dir<-data.dir.list[i]
+  output.subdir<-file.path(output.dir,sample.names[i])
+  if(file.exists(output.subdir)==F){
+    dir.create(output.subdir)
+  }
+
+  # get the list of folders under data.dir
+  fastq.filenames<-list.files(data.dir,full.names = FALSE, recursive=FALSE)
+  fastq.filepath<-file.path(data.dir,fastq.filenames)
+  jobname<-paste(my.element.extract(sample.names[i],splitchar="_",index=2))
+  
+  script.filepath<-file.path(script.dir,paste(jobname,".sh",sep=""))
+  
+  # We assume there's only one part
+  temp<-"#!/bin/bash\n"
+  temp<-paste0(temp,"#SBATCH --partition=pi_kaminski,day\n")
+  temp<-paste0(temp,"#SBATCH --job-name=",jobname,"\n")
+  temp<-paste0(temp,"#SBATCH --ntasks=1\n")
+  temp<-paste0(temp,"#SBATCH --cpus-per-task=10\n")
+  temp<-paste0(temp,"#SBATCH --mem-per-cpu=6Gb\n")
+  temp<-paste0(temp,"#SBATCH --time=1-00:00:00\n")
+  temp<-paste0(temp,"module load miniconda/4.9.2\n")
+  temp<-paste0(temp,"conda activate cutadaptenv\n")
+  
+  r1.output.filepath.1<-file.path(output.subdir,paste(my.element.extract(fastq.filenames[1],splitchar="\\.",index=1),"_round1.fastq.gz",sep=""))
+  r2.output.filepath.1<-file.path(output.subdir,paste(my.element.extract(fastq.filenames[2],splitchar="\\.",index=1),"_round1.fastq.gz",sep=""))
+  
+  # trim off the illumina universal adapater
+  temp<-paste(temp,"cutadapt -a AGATCGGAAGAG -A AGATCGGAAGAG -q 15 -m 30 --max-n 2 --pair-filter=any -j 10 -o ",r1.output.filepath.1," -p ",r2.output.filepath.1," ",fastq.filepath[1]," ",fastq.filepath[2],"\n",sep="")
+
+  
+  r1.output.filepath.2<-file.path(output.subdir,paste(my.element.extract(fastq.filenames[1],splitchar="\\.",index=1),"_round2.fastq.gz",sep=""))
+  r2.output.filepath.2<-file.path(output.subdir,paste(my.element.extract(fastq.filenames[2],splitchar="\\.",index=1),"_round2.fastq.gz",sep=""))
+
+
+  r1.output.filepath.3<-file.path(output.subdir,fastq.filenames[1])
+  r2.output.filepath.3<-file.path(output.subdir,fastq.filenames[2])
+  
+  # trim off the polyA tail
+  temp<-paste(temp,"cutadapt -a \"A{10}\" -G \"T{10}\" -m 30 --max-n 2 --pair-filter=any -j 10 -o ",r1.output.filepath.2," -p ",r2.output.filepath.2," ",r1.output.filepath.1," ",r2.output.filepath.1,"\n",sep="")
+
+  temp<-paste(temp,"cutadapt -g \"T{10}\" -A \"A{10}\" -m 30 --max-n 2 --pair-filter=any -j 10 -o ",r1.output.filepath.3," -p ",r2.output.filepath.3," ",r1.output.filepath.2," ",r2.output.filepath.2,"\n",sep="")
+
+  cat(temp,file=script.filepath,append=F)
+  cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+#system(paste("nohup ",script.filepath," > ",log.filepath," &",sep=""))
+```
+
+We submit all the jobs by typing `jobsub.bat` in the terminal. 
+
+NOTE: There are issues with -G T{10} becuase polyT on the 5' end could be longer than 10bps. When that happens, cutadapt will take the leftmost T{10} in the read with the least error and trim everything before that. But actually, we would want to trim off everything before the rightmost T{10} in that read. We decided to move on with the results because most likely those with multiple T{10} on the 5' end won't have too much information.
+
+# FastQC on trimmed reads
+We generate a summary of the fastQC results on the trimmed reads to see if the problems were solved.
+
+First, we generate the FastQC on all the files. The zip file of FastQC was downloaded and unzipped. We had to make fastqc executable using "chmod 700 fastqc" under the folder where fastqc resides.
+
+```{r}
+# We ran these codes directly on the HPC to generate the sh file to run FastQC on each sample.
+source("/home/xy48/Rprogram/my_functions.R")
+fastqc.filepath<-"/home/xy48/Tools/FastQC/fastqc"
+work.dir<-"/home/xy48/scratch/Shervin"
+cutadapt.dir<-file.path(work.dir,"results_cutadapt")
+
+script.dir<-file.path(work.dir,"scripts_cutadapt_fastqc")
+output.dir<-file.path(work.dir,"results_cutadapt_fastqc")
+
+if(file.exists(script.dir)==F){
+  dir.create(script.dir)
+}
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+  file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+sample.names<-list.files(cutadapt.dir)
+
+for(i in 1:length(sample.names)){
+  script.filepath<-file.path(script.dir,paste(sample.names[i],".sh",sep=""))
+  output.subdir<-file.path(output.dir,sample.names[i])
+  if(file.exists(output.subdir)==F){
+    dir.create(output.subdir)
+  }
+  
+  # generate the header for the sh file
+  cmd.out<-"#!/bin/bash\n"
+  cmd.out<-paste(cmd.out,"#SBATCH --partition=day,pi_kaminski\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --job-name=",sample.names[i],"\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --ntasks=1\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --cpus-per-task=10\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --mem-per-cpu=10G\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --time=1-00:00:00\n",sep="")
+  
+  fastq.filepath<-list.files(file.path(cutadapt.dir,sample.names[i]),full.names = TRUE)
+  fastq.filepath<-fastq.filepath[-grep("_round1",fastq.filepath)]
+  fastq.filepath<-fastq.filepath[-grep("_round2",fastq.filepath)]
+  temp<-paste(fastqc.filepath," -o ",output.subdir," -t 10 ",fastq.filepath,"\n",sep="")
+  cmd.out<-paste(cmd.out,paste(temp,collapse="\n"),sep="")
+  cat(cmd.out,file=script.filepath,append=F)
+  
+  cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+
+```
+
+We submit all the jobs by typing 
+```jobsub.bat```
+under the folders containing the jobsub.filepath.
+
+Second, we unzip the zip files generated by FastQC.
+```{r}
+# These codes were run directy on the HPC
+
+# First, we unzip the FastQC report zip files
+result.dir<-"/home/xy48/scratch/Shervin/results_cutadapt_fastqc"
+sample.names<-list.files(result.dir)
+
+for(i in 1:length(sample.names)){
+  filenames<-list.files(file.path(result.dir,sample.names[i]))
+  filenames<-filenames[grep(".zip",filenames)]
+  for(j in 1:length(filenames)){
+    unzip(file.path(result.dir,sample.names[i],filenames[j]),exdir=file.path(result.dir,sample.names[i]))
+  }
+}
+```
+
+Third, extract the results across different files and merge them into one single file.
+```{r}
+# These codes were run directy on the HPC
+###########
+# Second, we extract the results and export it into a spreadsheet.
+source("~/Rprogram/my_functions.R")
+result.dir<-"/home/xy48/scratch/Shervin/results_cutadapt_fastqc"
+output.filepath<-"/home/xy48/scratch/Shervin/FastQC_round2_results_table.txt"
+sample.names<-list.files(result.dir)
+cmd.out<-cmd.out<-data.frame()
+filenames.vect<-character()
+
+
+for(i in 1:length(sample.names)){
+  
+  result.subdir<-file.path(result.dir,sample.names[i])
+  temp.dirs<-list.dirs(result.subdir,full.names=F,recursive = FALSE)
+  input.filenames<-file.path(temp.dirs,"summary.txt")
+  filenames.vect<-c(filenames.vect,temp.dirs)
+  input.filepath<-file.path(result.subdir,input.filenames)
+  
+  my.data.1<-data.frame()
+  for(j in 1:length(input.filepath)){
+    temp.text<-as.matrix(read.table(input.filepath[j],sep="\t",header=F,check.names=F))
+    temp.values<-temp.text[,1]
+    names(temp.values)<-temp.text[,2]
+    if(i==1 & j==1){
+      my.rownames<-temp.text[,2]
+    }
+    my.data.1<-rbind(my.data.1,as.data.frame(t(temp.values)))
+  }
+  
+  input.filenames<-file.path(temp.dirs,"fastqc_data.txt")
+  input.filepath<-file.path(result.subdir,input.filenames)
+  my.data<-data.frame()
+  for(j in 1:length(input.filepath)){
+    temp.text<-readLines(input.filepath[j])
+    
+    # extract the overrepresented sequences
+    over.start<-grep(">>Overrepresented sequences",temp.text)
+    adapter.start<-grep(">>Adapter Content",temp.text)
+    file.end<-length(temp.text)
+    
+#    my.temp<-c(my.temp,my.element.extract(temp.text[over.start+2],splitchar="\t",index=1))
+    my.temp<-data.frame(overrepresented_sequence=my.element.extract(temp.text[over.start+2],splitchar="\t",index=1))
+    temp.names<-unlist(strsplit(temp.text[adapter.start+1],split="\t"))
+    temp.values<-unlist(strsplit(temp.text[length(temp.text)-1],split="\t"))
+    temp.values<-temp.values[-1]
+    names(temp.values)<-temp.names[2:length(temp.names)]
+    temp.values<-as.data.frame(t(temp.values))
+    my.temp<-cbind(my.temp,temp.values)
+    my.data<-rbind(my.data,my.temp)
+  }
+
+  my.data<-cbind(my.data.1,my.data)
+  
+  cmd.out<-rbind(cmd.out,my.data)
+} 
+
+temp1<-sapply(filenames.vect,my.element.extract,splitchar="_",index=1)
+temp2<-sapply(filenames.vect,my.element.extract,splitchar="_",index=6)
+rownames(cmd.out)<-paste(temp1,"_",temp2,sep="")
+
+# load in the phenotype data table and add the protocol information into this results (optional)
+pheno.filepath<-"/home/xy48/scratch/Shervin/pheno_data/phenotype_updated.txt"
+pheno.table<-read.table(pheno.filepath,sep="\t",header=T,check.names=F)
+protocol.vect<-as.matrix(pheno.table)[,"Protocol"]
+names(protocol.vect)<-as.matrix(pheno.table)[,"Sample"]
+
+temp1<-sapply(rownames(cmd.out),my.element.extract,splitchar="_",index=1)
+cmd.out<-cbind(cmd.out,protocol.vect[temp1])
+colnames(cmd.out)[ncol(cmd.out)]<-"protocol"
+
+# output the table
+cat("filenames\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,sep="\t",row.names=T,col.names=T,quote=F,append=T)
+```
+
+

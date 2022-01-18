@@ -1,0 +1,372 @@
+---
+title: "FastQC on bulk RNAseq data"
+author: "Xiting Yan"
+date: "05/25/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+    highlight: tango
+    number_sections: no
+    theme: united
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
+
+library(kableExtra)
+library(gdata)
+library(knitr)
+library(captioner)
+library(nlme)
+library(rgl)
+library(gplots)
+
+knitr::knit_hooks$set(webgl = hook_webgl)
+
+
+table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
+figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
+
+
+table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
+figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
+
+table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
+figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+
+home.dir<-"/home/yanxiting/driver_Grace"
+work.dir<-file.path(home.dir,"scratch","Shervin")
+my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
+
+```
+
+
+# Background
+
+In this note, we demonstrate how to run principal component analysis (PCA) on TPM matrix to find potential outliers and batch effect.
+
+There are no required R packages.
+
+# 3D PCA plots (all samples)
+
+We generate the 3-dimensional PCA plots.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+tpm.matrix.filepath<-file.path(work.dir,"log2TPM_all.txt")
+pheno.filepath<-file.path(work.dir,"pheno_data","phenotype_updated.txt")
+
+# load in the phenotype data
+pheno.table<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+rownames(pheno.table)<-pheno.table[,1]
+
+pca.dir<-file.path(work.dir,"PCA")
+if(file.exists(pca.dir)==F){
+dir.create(pca.dir)
+}
+
+# Load in the FPKM matrix. The Gene_ID in the annotation is not unique.
+tpm.matrix<-read.table(tpm.matrix.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F,comment.char="")
+annot.matrix<-tpm.matrix[,1:5]
+tpm.matrix<-tpm.matrix[,6:ncol(tpm.matrix)]
+#######################
+# round 1: generate the PCA to put BAL and PBMC samples together
+data.matrix<-tpm.matrix
+temp.sd<-apply(data.matrix,1,sd)
+temp.sd.2<-temp.sd
+
+# remove outliers
+outlier.names<-character(0)
+if(length(outlier.names)>0){
+data.matrix<-data.matrix[,!(colnames(data.matrix)%in%outlier.names)]
+}      
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+
+##################
+# PCA analysis
+library(gplots)
+
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+# For no outliers, 0.1246301 0.2141877 0.2663615
+# After switch, 0.1255119 0.2151623 0.2649453
+# Round 2, 0.1243519 0.1820763 0.2234469
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+
+my.colors<-factor(pheno.table[colnames(data.matrix.norm),"Protocol"],levels=c("PolyA","RiboD"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T)
+legend3d("topright", legend = c("PolyA","RiboD"), pch = 16, col = my.distinct.colors[1:2], cex=0.8, inset=c(0.02))
+rglwidget()
+
+filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+
+
+# label the samples based on subjects and disease
+open3d()
+
+my.colors<-factor(sapply(colnames(data.matrix.norm),my.element.extract,splitchar="",index=-1),levels=c("T","N"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+my.pch<-factor(sapply(colnames(data.matrix.norm),my.element.remove,splitchar="",index=-1))
+my.pch<-c(0,1,2,3,4,5,6,7,8,9)[as.numeric(my.pch)]
+
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T,pch=my.pch)
+legend3d("topright", legend = c("Tumor","Normal"), pch=16, col = my.distinct.colors[1:2], cex=0.8, inset=c(0.02))
+rglwidget()
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+
+
+# label samples using subject ID
+open3d()
+my.subjects<-factor(sapply(colnames(data.matrix.norm),my.element.remove,splitchar="",index=-1))
+my.colors<-my.distinct.colors[as.numeric(my.subjects)]
+
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T,pch=my.pch)
+legend3d("topright", legend = levels(my.subjects), pch=16, col = my.distinct.colors[1:nlevels(my.subjects)], cex=0.8, inset=c(0.02))
+rglwidget()
+
+
+```
+
+
+
+
+# 3D PCA plots (polyA only)
+
+We generate the 3-dimensional PCA plots for polyA data only.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+tpm.matrix.filepath<-file.path(work.dir,"log2TPM_all.txt")
+pheno.filepath<-file.path(work.dir,"pheno_data","phenotype_updated.txt")
+
+# load in the phenotype data
+pheno.table<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+rownames(pheno.table)<-pheno.table[,1]
+
+pca.dir<-file.path(work.dir,"PCA")
+if(file.exists(pca.dir)==F){
+dir.create(pca.dir)
+}
+
+# Load in the FPKM matrix. The Gene_ID in the annotation is not unique.
+tpm.matrix<-read.table(tpm.matrix.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F,comment.char="")
+annot.matrix<-tpm.matrix[,1:5]
+tpm.matrix<-tpm.matrix[,6:ncol(tpm.matrix)]
+tpm.matrix<-tpm.matrix[,pheno.table[colnames(tpm.matrix),"Protocol"]=="PolyA"]
+
+#######################
+# round 1: generate the PCA to put BAL and PBMC samples together
+data.matrix<-tpm.matrix
+temp.sd<-apply(data.matrix,1,sd)
+temp.sd.2<-temp.sd
+
+# remove outliers
+outlier.names<-character(0)
+if(length(outlier.names)>0){
+data.matrix<-data.matrix[,!(colnames(data.matrix)%in%outlier.names)]
+}      
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+
+##################
+# PCA analysis
+library(gplots)
+
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+# For no outliers, 0.1246301 0.2141877 0.2663615
+# After switch, 0.1255119 0.2151623 0.2649453
+# Round 2, 0.1243519 0.1820763 0.2234469
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+
+my.colors<-factor(pheno.table[colnames(data.matrix.norm),"Protocol"],levels=c("PolyA","RiboD"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T)
+legend3d("topright", legend = c("PolyA","RiboD"), pch = 16, col = my.distinct.colors[1:2], cex=0.8, inset=c(0.02))
+rglwidget()
+
+filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+
+
+# label the samples based on subjects and disease
+open3d()
+
+my.colors<-factor(sapply(colnames(data.matrix.norm),my.element.extract,splitchar="",index=-1),levels=c("T","N"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+my.pch<-factor(sapply(colnames(data.matrix.norm),my.element.remove,splitchar="",index=-1))
+my.pch<-c(0,1,2,3,4,5,6,7,8,9)[as.numeric(my.pch)]
+
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T,pch=my.pch)
+legend3d("topright", legend = c("Tumor","Normal"), pch=16, col = my.distinct.colors[1:2], cex=0.8, inset=c(0.02))
+rglwidget()
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+
+
+# label samples using subject ID
+open3d()
+my.subjects<-factor(sapply(colnames(data.matrix.norm),my.element.remove,splitchar="",index=-1))
+my.colors<-my.distinct.colors[as.numeric(my.subjects)]
+
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T,pch=my.pch)
+legend3d("topright", legend = levels(my.subjects), pch=16, col = my.distinct.colors[1:nlevels(my.subjects)], cex=0.8, inset=c(0.02))
+rglwidget()
+
+
+```
+
+
+
+
+
+# 3D PCA plots (ribo0 only)
+
+We generate the 3-dimensional PCA plots for ribo0 data only.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+tpm.matrix.filepath<-file.path(work.dir,"log2TPM_all.txt")
+pheno.filepath<-file.path(work.dir,"pheno_data","phenotype_updated.txt")
+
+# load in the phenotype data
+pheno.table<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+rownames(pheno.table)<-pheno.table[,1]
+
+pca.dir<-file.path(work.dir,"PCA")
+if(file.exists(pca.dir)==F){
+dir.create(pca.dir)
+}
+
+# Load in the FPKM matrix. The Gene_ID in the annotation is not unique.
+tpm.matrix<-read.table(tpm.matrix.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F,comment.char="")
+annot.matrix<-tpm.matrix[,1:5]
+tpm.matrix<-tpm.matrix[,6:ncol(tpm.matrix)]
+tpm.matrix<-tpm.matrix[,pheno.table[colnames(tpm.matrix),"Protocol"]=="RiboD"]
+
+#######################
+# round 1: generate the PCA to put BAL and PBMC samples together
+data.matrix<-tpm.matrix
+temp.sd<-apply(data.matrix,1,sd)
+temp.sd.2<-temp.sd
+
+# remove outliers
+outlier.names<-character(0)
+if(length(outlier.names)>0){
+data.matrix<-data.matrix[,!(colnames(data.matrix)%in%outlier.names)]
+}      
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+
+##################
+# PCA analysis
+library(gplots)
+
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+# For no outliers, 0.1246301 0.2141877 0.2663615
+# After switch, 0.1255119 0.2151623 0.2649453
+# Round 2, 0.1243519 0.1820763 0.2234469
+
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+
+my.colors<-factor(pheno.table[colnames(data.matrix.norm),"Protocol"],levels=c("PolyA","RiboD"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T)
+legend3d("topright", legend = c("PolyA","RiboD"), pch = 16, col = my.distinct.colors[1:2], cex=0.8, inset=c(0.02))
+rglwidget()
+
+filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+
+
+# label the samples based on subjects and disease
+open3d()
+
+my.colors<-factor(sapply(colnames(data.matrix.norm),my.element.extract,splitchar="",index=-1),levels=c("T","N"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+my.pch<-factor(sapply(colnames(data.matrix.norm),my.element.remove,splitchar="",index=-1))
+my.pch<-c(0,1,2,3,4,5,6,7,8,9)[as.numeric(my.pch)]
+
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T,pch=my.pch)
+legend3d("topright", legend = c("Tumor","Normal"), pch=16, col = my.distinct.colors[1:2], cex=0.8, inset=c(0.02))
+rglwidget()
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+
+
+# label samples using subject ID
+open3d()
+my.subjects<-factor(sapply(colnames(data.matrix.norm),my.element.remove,splitchar="",index=-1))
+my.colors<-my.distinct.colors[as.numeric(my.subjects)]
+
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=2,box = F,axes = T,pch=my.pch)
+legend3d("topright", legend = levels(my.subjects), pch=16, col = my.distinct.colors[1:nlevels(my.subjects)], cex=0.8, inset=c(0.02))
+rglwidget()
+
+
+```
+
+
