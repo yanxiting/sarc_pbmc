@@ -39,7 +39,8 @@ figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
 table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
 figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 
-home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
 source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 ```
@@ -50,9 +51,9 @@ In this note, we demonstrate how to use R to generate sh file to run FastQC on a
 * Run Cutadapt on different samples in parallele (style 1).
 * Run Cutadapt on different samples in one thread (style 2).
 
-# Style 1 (HPC)
-This style will be run on a hpc and specifically in this note, it will be run on grace hpc. 
+# FastQC
 
+## Apply FastQC
 Input for this style includes:
 
 * data.dir: folder containing a list of folders, each of which contains fastq files for a given sample. no other files should exist under these folders other than the fastq.gz files.
@@ -63,9 +64,9 @@ Input for this style includes:
 # This chunck needs to be run on the hpc.
 # Since our samples were saved in two different folders, we run this chunck for each data.dir separately.
 #data.dir<-"/home/xy48/scratch/Shervin/data/sample_dir_000005540"
-data.dir.list<-c("/home/xy48/scratch/Shervin/data/sample_dir_000005659",
-                 "/home/xy48/scratch/Shervin/data/sample_dir_000005540")
-work.dir<-"/home/xy48/scratch/Shervin"
+work.dir<-file.path(home.dir,"scratch60/Laura_Koth")
+data.dir<-file.path(work.dir,"fastq")
+
 fastqc.filepath<-"/home/xy48/scratch_kaminski/public/softwares/FastQC_v0.11.5/fastqc" # This has to be a location on the hpc.
 
 script.dir<-file.path(work.dir,"scripts_FastQC")
@@ -86,12 +87,13 @@ if(file.exists(jobsub.filepath)){
 file.create(jobsub.filepath)
 
 # get the list of folders under data.dir
-sample.names<-list.dirs(data.dir,full.names = FALSE, recursive=FALSE)
+filenames<-list.files(data.dir)
 
 # we generate one sh file for each sample separately.
-for(i in 1:length(sample.names)){
-  script.filepath<-file.path(script.dir,paste(sample.names[i],".sh",sep=""))
-  output.subdir<-file.path(output.dir,sample.names[i])
+for(i in 1:length(filenames)){
+  sample.name<-my.element.extract(filenames[i],splitchar="\\.",index=1)
+  script.filepath<-file.path(script.dir,paste(sample.name,".sh",sep=""))
+  output.subdir<-file.path(output.dir,sample.name)
   if(file.exists(output.subdir)==F){
     dir.create(output.subdir)
   }
@@ -99,13 +101,13 @@ for(i in 1:length(sample.names)){
   # generate the header for the sh file
   cmd.out<-"#!/bin/bash\n"
   cmd.out<-paste(cmd.out,"#SBATCH --partition=day,pi_kaminski\n",sep="")
-  cmd.out<-paste(cmd.out,"#SBATCH --job-name=",sample.names[i],"\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --job-name=",sample.name,"\n",sep="")
   cmd.out<-paste(cmd.out,"#SBATCH --ntasks=1\n",sep="")
   cmd.out<-paste(cmd.out,"#SBATCH --cpus-per-task=10\n",sep="")
   cmd.out<-paste(cmd.out,"#SBATCH --mem-per-cpu=10G\n",sep="")
   cmd.out<-paste(cmd.out,"#SBATCH --time=1-00:00:00\n",sep="")
   
-  fastq.filepath<-list.files(file.path(data.dir,sample.names[i]),full.names = TRUE)
+  fastq.filepath<-file.path(data.dir,filenames[i])
   temp<-paste(fastqc.filepath," -o ",output.subdir," -t 10 ",fastq.filepath,"\n",sep="")
   cmd.out<-paste(cmd.out,paste(temp,collapse="\n"),sep="")
   cat(cmd.out,file=script.filepath,append=F)
@@ -116,59 +118,7 @@ system(paste("chmod 700 ",jobsub.filepath,sep=""))
 
 ```
 
-The code chunck above will generate one sh file for each sample and a jobsub.bat file to submit all the jobs to the hpc. We just need to run jobsub.bat as an executable file to start all the jobs.
-
-# Style 2 (Workstation)
-Since each FastQC won't take too much time, when there are not so many samples, it is more convenient for us to run FastQC on different samples in one single thread on a workstation. 
-
-```{r}
-# this chunck needs to be run on the workstation.
-data.dir.list<-c(file.path(home.dir,"scratch/Shervin/data/sample_dir_000005659"),
-            file.path(home.dir,"scratch/Shervin/data/sample_dir_000005540"))
-
-work.dir<-file.path(home.dir,"scratch/Shervin")
-fastqc.filepath<-"/home/yanxiting/MyTools/FastQC/fastqc" # This has to be a location on the workstation.
-
-script.filepath<-"/home/yanxiting/Documents/Research/Shervin/FastQC.bat"
-log.filepath<-"/home/yanxiting/Documents/Research/Shervin/FastQC.log"
-
-if(file.exists(script.filepath)){
-  file.remove(script.filepath)
-}
-file.create(script.filepath)
-
-output.dir<-file.path(work.dir,"results_FastQC")
-
-if(file.exists(output.dir)==F){
-  dir.create(output.dir)
-}
-
-for(data.dir in data.dir.list){
-  # get the list of folders under data.dir
-  sample.names<-list.dirs(data.dir,full.names = FALSE, recursive=FALSE)
-  
-  # we generate one sh file for each sample separately.
-  for(i in 1:length(sample.names)){
-    output.subdir<-file.path(output.dir,sample.names[i])
-    if(file.exists(output.subdir)==F){
-      dir.create(output.subdir)
-    }
-  
-  fastq.filepath<-list.files(file.path(data.dir,sample.names[i]),full.names = TRUE)
-  temp<-paste(fastqc.filepath," -o ",output.subdir," -t 15 ",fastq.filepath,"\n",sep="")
-  cat(temp,file=script.filepath,append=T)
-}
-
-}
-
-system(paste("chmod 700 ",script.filepath,sep=""))
-#system(paste("nohup ",script.filepath," > ",log.filepath," &",sep=""))
-```
-
-We run the FastQC.bat using `nohup FastQC.bat > FastQC.log &`. It's better to run this in shell because the screen output can be redirected into the log file. Directly running this within rstudio will cause the screen output present in rstudio screen.
-
-
-# Generate Summary
+## FastQC Summary
 We load in the results and generate a summary of the fastQC results.
 
 First, we unzip the zip files generated by FastQC.
