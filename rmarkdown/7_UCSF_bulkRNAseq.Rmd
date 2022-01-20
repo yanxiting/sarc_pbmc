@@ -367,7 +367,7 @@ rownames(star.matrix)<-sample.names
 colnames(star.matrix)<-c("total","mapped_unique","maprate_unique","mapped_multiloci","maprate_multiloci","mapped_toomanyloci","maprate_toomanyloci","unmaprate_mismatches","unmaprate_tooshort","unmaprate_other","chimeric","chimeric_rate")
 star.matrix[,c("total","mapped_unique","mapped_multiloci","mapped_toomanyloci","chimeric")]<-star.matrix[,c("total","mapped_unique","mapped_multiloci","mapped_toomanyloci","chimeric")]*2
 star.matrix<-cbind(rownames(star.matrix),star.matrix)
-
+colnames(star.matrix)[1]<-"sample_names"
 write.table(star.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 
 ```
