@@ -372,3 +372,9 @@ write.table(star.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.n
 
 ```
 
+# Count matrices
+
+We generate the raw count and the DESeq2 normalized data based on the mapping results.
+```{r}
+
+```
