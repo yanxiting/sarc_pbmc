@@ -237,6 +237,7 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
 
 # DESeq2 log2 adjusted data
 
+## GSEA input files generation
 We first generate file containing both the clinical matrix and CT scan features so that both group 1 and group 2 in the GSEA analysis can be defined based on combinations of clinical triats and CT scan data.
 
 ```{r eval=FALSE}
@@ -1102,4 +1103,25 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
 
 
 ```
+
+## Comparing to 10X Genomicx data
+
+We downloaded a previously published 10X Genomicx data and compared the genes in Bloom data to see if they are mostly cell type markers.
+
+```{r}
+# load in the scRNA-seq data of SARC PBMC samples that was previously published
+data.filepath<-"~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/GSE132338_SingleCellExperiment.RDS"
+sc.data<-readRDS(data.filepath,refhook=NULL)
+
+# identify the cell type marker genes
+Idents(sc.data)<-sc.data@meta.data$celltype
+celltype.names<-unique(as.character(sc.data@meta.data$celltype))
+sc.markers.result<-list()
+
+for(i in 1:length(celltype.names)){
+  sc.markers.result[[i]]<-FindMarkers(sc.data,ident.1=celltype.names[i],min.pct=0.05)
+}
+
+```
+
 
