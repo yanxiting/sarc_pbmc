@@ -1106,22 +1106,236 @@ my_gsea_filecreate_binary(fpkm.filepath=fpkm.file,
 
 ## Comparing to 10X Genomicx data
 
-We downloaded a previously published 10X Genomicx data and compared the genes in Bloom data to see if they are mostly cell type markers.
+We downloaded a previously published 10X Genomicx data and compared the genes in Bloom data to see if they are enriched in cell type markers or which cell types are expressing them.
 
-```{r}
-# load in the scRNA-seq data of SARC PBMC samples that was previously published
-data.filepath<-"~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/GSE132338_SingleCellExperiment.RDS"
+
+### Standard Seurat
+
+First, we load in the raw count data and redo the preprocessing using standard Seurat pipeline.
+```{r fig.width=8,fig.width=8}
+# load in the scRNA-seq data of SARC PBMC samples with annotations that was previously published
+library(Matrix)
+count.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Data/GSE132338_matrix_counts.mtx"
+coldata.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Data/GSE132338_matrix_colData.txt"
+rowdata.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Data/GSE132338_matrix_rowData.mtx"
+data.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Data/GSE132338_SingleCellExperiment.RDS"
 sc.data<-readRDS(data.filepath,refhook=NULL)
 
-# identify the cell type marker genes
-Idents(sc.data)<-sc.data@meta.data$celltype
-celltype.names<-unique(as.character(sc.data@meta.data$celltype))
-sc.markers.result<-list()
+count.data<-readMM(count.filepath)
+mycol.data<-read.table(coldata.filepath,sep="\t",row.names=1,header=T)
+myrow.data<-readLines(rowdata.filepath)
 
-for(i in 1:length(celltype.names)){
-  sc.markers.result[[i]]<-FindMarkers(sc.data,ident.1=celltype.names[i],min.pct=0.05)
+# create a seurat object with the count data and put the integrated data in
+rownames(count.data)<-myrow.data[2:length(myrow.data)]
+colnames(count.data)<-rownames(mycol.data)
+
+# create a Seurat object using the count matrix
+my.data<-CreateSeuratObject(counts=count.data,project="PBMC",min.cells=0,min.features = 0)
+my.data[["percent.mt"]] <- PercentageFeatureSet(my.data, pattern = "^MT-")
+
+# Visualize QC metrics as a violin plot
+VlnPlot(my.data, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+plot1 <- FeatureScatter(my.data, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(my.data, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+grid.arrange(plot1 , plot2,ncol=2)
+
+my.data <- NormalizeData(my.data, normalization.method = "LogNormalize", scale.factor = 10000)
+my.data <- FindVariableFeatures(my.data, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(my.data), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(my.data)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+grid.arrange(plot1,plot2,ncol=2)
+```
+
+```{r fig.height=8,fig.width=8,message=FALSE}
+# scale the data
+all.genes <- rownames(my.data)
+my.data <- ScaleData(my.data, features = all.genes)
+
+# conduct PCA
+my.data <- RunPCA(my.data, features = VariableFeatures(object = my.data))
+VizDimLoadings(my.data, dims = 1:2, reduction = "pca")
+DimPlot(my.data, reduction = "pca")
+```
+
+
+```{r fig.width=10,fig.height=24}
+DimHeatmap(my.data, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+```{r fig.width=8,fig.height=8,message=FALSE}
+# decide the number of PC to use
+my.data <- JackStraw(my.data, dims = 40,num.replicate = 100)
+my.data <- ScoreJackStraw(my.data, dims = 1:40)
+JackStrawPlot(my.data, dims = 1:40)
+```
+
+We decides to use the top 20 PCs.
+```{r fig.width=8, fig.height=8}
+num.pc<-20
+my.data <- FindNeighbors(my.data, dims = 1:num.pc)
+my.data <- FindClusters(my.data, resolution = 0.5)
+my.data <- RunUMAP(my.data, dims = 1:num.pc)
+DimPlot(my.data, reduction = "umap")
+```
+
+Draw the UMAP with annotation from GEO.
+
+```{r fig.width=8,fig.height=8,message=FALSE}
+# add the cell type annotation into the data
+temp.data<-sc.data@meta.data
+temp.data<-temp.data[rownames(my.data@meta.data),]
+my.data@meta.data<-cbind(my.data@meta.data,temp.data)
+Idents(my.data)<-my.data@meta.data$celltype
+
+my.distinct.colors<-c('#e6194b' , '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#808080', '#800000',  '#808000', '#ffd8b1', '#000075',  '#ffffff', '#000000','#fffac8','#aaffc3')
+celltype.colors<-my.distinct.colors[1:length(unique(my.data@meta.data$celltype))]
+
+DimPlot(my.data, reduction = "umap",cols=celltype.colors,shuffle=T)
+
+Idents(my.data)<-my.data@meta.data$donor
+DimPlot(my.data, reduction = "umap",shuffle=T)
+```
+Save the Seurat object.
+```{r}
+saveRDS(my.data, file ="/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA_compare/GSE132338_seurat_nointegration.rds")
+```
+
+
+We check the expression of the analysis4b genes in all cell types.
+```{r fig.width=10,fig.height=5,message=FALSE}
+my.distinct.colors<-c('#e6194b' , '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#808080', '#800000',  '#808000', '#ffd8b1', '#000075',  '#ffffff', '#000000','#fffac8','#aaffc3')
+celltype.colors<-my.distinct.colors[1:length(unique(my.data@meta.data$celltype))]
+bloom.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Data/analysis4b_BLOOM.tsv"
+bloom.data<-as.data.frame(read_tsv(bloom.filepath))
+bloom.genes<-bloom.data[bloom.data$`CORE ENRICHMENT`=="Yes","SYMBOL"]
+
+temp.names<-intersect(bloom.genes,rownames(sc.data@assays$integrated@counts))
+
+#output.filepath<-"~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/scRNA_compare/featureplot_bloom_4b.pdf"
+#output.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA_compare/featureplot_bloom_4b.pdf"
+#pdf(output.filepath,width = 8,height=8,onefile = T)
+#g.list<-list()
+
+for(i in 1:length(temp.names)){
+#temp.data<-my.data@meta.data
+#g.1<-ggplot(temp.data,aes(x=UMAP_1,y=UMAP_2,colour=celltype))+geom_point(size=0.1,shape=19)+scale_color_manual(values=celltype.colors)+guides(color = guide_legend(override.aes = list(size = 8)))
+
+Idents(my.data)<-my.data@meta.data$celltype
+g.1<-DimPlot(my.data, reduction = "umap",cols=celltype.colors,shuffle=T)
+g.2<-FeaturePlot(my.data,features=temp.names[i],pt.size = 0.1,order=T)
+g<-grid.arrange(g.1,g.2,ncol=2)
+
+output.filepath<-file.path("/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA_compare",paste("featureplot_bloom_4b_",temp.names[i],".pdf"))
+ggsave(output.filepath,g,device="pdf",width=10,height=5)
 }
 
 ```
 
 
+### Integrated Analysis
+Conduct integrated analysis to remove donor effect. We have not succeeded in the integration analysis due to the very small number of cells per subject.
+```{r fig.width=8,fig.height=8,message=FALSE}
+# split the dataset into a list of two seurat objects (stim and CTRL)
+ifnb.list <- SplitObject(my.data, split.by = "donor")
+temp.size<-matrix(unlist(lapply(ifnb.list,dim)),ncol=2,byrow=T)[,2]
+#ifnb.list<-ifnb.list[temp.size>=30]
+
+# normalize and identify variable features for each dataset independently
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+# select features that are repeatedly variable across datasets for integration
+features <- SelectIntegrationFeatures(object.list = ifnb.list)
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, approx=FALSE)
+})
+
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, anchor.features = features, reduction = "rpca")
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+
+
+my.anchors <- FindIntegrationAnchors(object.list = ifnb.list, anchor.features = features)
+my.combined <- IntegrateData(anchorset = my.anchors)
+
+DefaultAssay(my.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+my.combined <- ScaleData(my.combined, verbose = FALSE)
+my.combined <- RunPCA(my.combined, npcs = 30, verbose = FALSE)
+my.combined <- RunUMAP(my.combined, reduction = "pca", dims = 1:30)
+my.combined <- FindNeighbors(my.combined, reduction = "pca", dims = 1:30)
+my.combined <- FindClusters(my.combined, resolution = 0.5)
+p1 <- DimPlot(my.combined, reduction = "umap", group.by = "donor")
+p2 <- DimPlot(my.combined, reduction = "umap", label = TRUE, repel = TRUE,shuffle=T)
+```
+
+
+
+```{r}
+# left over
+my.data@assays$integrated<-sc.data@assays$integrated
+my.data@meta.data<-cbind(my.data@meta.data,mycol.data)
+
+Idents(my.data)<-my.data@meta.data$celltype
+# identify the cell type marker genes
+#Idents(sc.data)<-sc.data@meta.data$celltype
+celltype.names<-unique(as.character(my.data@meta.data$celltype))
+sc.markers.result<-list()
+
+for(i in 1:length(celltype.names)){
+  sc.markers.result[[i]]<-FindMarkers(my.data,ident.1=celltype.names[i],min.pct=0.05)
+}
+
+# save the marker lists
+#output.filepath<-file.path("~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/GSE132338_SingleCellExperiment_markerlist.RDS")
+output.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA_compare/GSE132338_SingleCellExperiment_markerlist.RDS"
+saveRDS(sc.markers.result,file=output.filepath,refhook = NULL)
+```
+
+Draw the UMAPs to show the expression of bloom genes in this 10X data.
+```{r fig.width=8,fig.height=8}
+#bloom.filepath<-"~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/scRNA_compare/analysis4b_BLOOM.tsv"
+my.distinct.colors<-c('#e6194b' , '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#808080', '#800000',  '#808000', '#ffd8b1', '#000075',  '#ffffff', '#000000','#fffac8','#aaffc3')
+celltype.colors<-my.distinct.colors[1:length(unique(my.data@meta.data$celltype))]
+bloom.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Data/analysis4b_BLOOM.tsv"
+bloom.data<-as.data.frame(read_tsv(bloom.filepath))
+bloom.genes<-bloom.data[bloom.data$`CORE ENRICHMENT`=="Yes","SYMBOL"]
+
+temp.names<-intersect(bloom.genes,rownames(sc.data@assays$integrated@counts))
+
+#output.filepath<-"~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/scRNA_compare/featureplot_bloom_4b.pdf"
+output.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA_compare/featureplot_bloom_4b.pdf"
+pdf(output.filepath,width = 8,height=8,onefile = T)
+#g.list<-list()
+
+for(i in 1:length(temp.names)){
+temp.data<-my.data@meta.data
+g.1<-ggplot(temp.data,aes(x=UMAP_1,y=UMAP_2,colour=celltype))+geom_point(size=0.1,shape=19)+scale_color_manual(values=celltype.colors)+guides(color = guide_legend(override.aes = list(size = 8)))
+
+temp.color<-sc.data@assays$integrated@counts[temp.names[i],]
+temp.data<-cbind(sc.data@meta.data,temp.color)
+colnames(temp.data)[ncol(temp.data)]<-"col"
+g.2<-ggplot(temp.data,aes(x=UMAP_1,y=UMAP_2,colour=col))+geom_point(size=0.01,shape=19)+scale_color_gradient(low="grey",high="red")+ggtitle(temp.names[i])
+
+#output.filepath<-file.path("~/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/scRNA_compare",paste("featureplot_bloom_4b_",temp.names[i],".pdf"))
+g<-grid.arrange(g.1,g.2,ncol=2)
+g
+output.filepath<-file.path("/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA_compare",paste("featureplot_bloom_4b_",temp.names[i],".pdf"))
+ggsave(output.filepath,g,device="pdf",width=8,height=8)
+
+}
+dev.off()
+
+
+```
+
+First, we evaluate the enrichment of BLOOM genes in the marker gene lists
