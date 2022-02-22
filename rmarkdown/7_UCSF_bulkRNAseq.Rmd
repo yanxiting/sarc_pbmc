@@ -3,7 +3,7 @@ title: "FastQC on bulk RNAseq data"
 author: "Xiting Yan"
 date: "05/25/2021"
 output:
-  html_notebook:
+  html_document:
     code_folding: hide
     fig_caption: yes
     highlight: tango
@@ -26,6 +26,7 @@ library(nlme)
 library(rgl)
 library(gplots)
 
+
 knit_hooks$set(webgl = hook_webgl)
 
 
@@ -39,8 +40,8 @@ figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
 table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
 figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 
-#home.dir<-"/home/yanxiting/driver_Grace"
-home.dir<-"/home/xy48"
+home.dir<-"/home/yanxiting/driver_Grace"
+#home.dir<-"/home/xy48"
 source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 ```
@@ -375,6 +376,361 @@ write.table(star.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.n
 # Count matrices
 
 We generate the raw count and the DESeq2 normalized data based on the mapping results.
-```{r}
 
+## Raw count matrix
+
+First, we generate the raw count for each sample separately.
+```{r rawcount_persample.R}
+library(Rsubread)
+library(edgeR)
+source("~/Rprogram/my_functions.R")
+
+#output.dir<-"/home/xy48/scratch60/Laura_Koth/results_rawcounts"
+#tophat.dir<-"/home/xy48/scratch60/Laura_Koth/results_STAR"
+#j=1
+
+###############################
+# load in the IDs that need to be switched with each other
+dir.list<-list.files(tophat.dir)
+count.table<-numeric()
+
+result.dirs<-dir.list
+#for(j in 1:length(result.dirs)){
+
+sample.name<-result.dirs[j]
+
+temp.files<-list.files(file.path(tophat.dir,result.dirs[j]))
+temp.files<-temp.files[grep("out.bam",temp.files)]
+bam.filepath<-file.path(tophat.dir,result.dirs[j],temp.files)
+
+temp<-featureCounts(bam.filepath,annot.inbuilt="hg38",annot.ext="/home/ysm/xiting_yan/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-2015-08-14-08-18-15/Genes/genes.gtf",isGTFAnnotationFile=T,GTF.featureType="exon",GTF.attrType="gene_id",useMetaFeatures=T,allowMultiOverlap=T,nthreads=1,countMultiMappingReads=T)
+
+anno.matrix<-temp[[2]]
+count.table<-cbind(count.table,temp[[1]])
+
+colnames(count.table)<-sample.name
+
+cmd.out<-cbind(anno.matrix,count.table)
+output.filepath<-file.path(output.dir,paste(sample.name,"_rawcounts.txt",sep=""))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+#}
+```
+
+We generate the sh file to apply the codes above to each sample in parallele.
+```{r}
+source("/home/xy48/Rprogram/my_functions.R")
+
+r.filepath<-"/home/xy48/scratch60/Laura_Koth/rawcount_persample.R"
+tophat.dir<-"/home/xy48/scratch60/Laura_Koth/results_STAR"
+work.dir<-"/home/xy48/scratch60/Laura_Koth"
+
+script.dir<-file.path(work.dir,"scripts_rawcounts_hg38")
+output.dir<-file.path(work.dir,"results_rawcounts_hg38")
+
+if(file.exists(script.dir)==F){
+dir.create(script.dir)
+}
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)
+}
+
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+filenames<-list.files(tophat.dir)
+sample.names<-filenames
+
+for(i in 1:length(sample.names)){
+
+script.filepath<-file.path(script.dir,paste(sample.names[i],".sh",sep=""))
+
+# generate the header for slurm
+cmd.out<-"#!/bin/bash\n#SBATCH --partition=day,pi_kaminski,week\n#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1\n#SBATCH --mem=8152\n#SBATCH --time=24:00:00\n#SBATCH --mail-type=NONE\n"
+cmd.out<-paste(cmd.out,"#SBATCH --job-name=",sample.names[i],"\n",sep="")
+cmd.out<-paste(cmd.out,"#SBATCH --error=",script.filepath,".e%J\n",sep="")
+cmd.out<-paste(cmd.out,"#SBATCH --output=",script.filepath,".o%J\n",sep="")
+
+cmd.out<-paste(cmd.out,"R --vanilla<<EOF\n",sep="")
+cmd.out<-paste(cmd.out,"tophat.dir<-\"",tophat.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"output.dir<-\"",output.dir,"\"\n",sep="")
+cmd.out<-paste(cmd.out,"j=",i,"\n",sep="")
+cmd.out<-paste(cmd.out,"source(\"",r.filepath,"\")\n",sep="")
+cmd.out<-paste(cmd.out,"EOF\n",sep="")
+
+cat(cmd.out,file=script.filepath,append=F)
+cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+
+system(paste("chmod 700 ",script.filepath,sep=""))
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+
+```
+
+We merge the raw count of different samples into the same matrix.
+```{r}
+# These codes can be run both on a workstation or on grace HPC. It only takes one single thread.
+source("~/Rprogram/my_functions.R")
+
+output.dir<-"/home/xy48/scratch60/Laura_Koth/results_rawcounts_hg38"
+tophat.dir<-"/home/xy48/scratch60/Laura_Koth/results_STAR"
+output.filepath<-"/home/xy48/scratch60/Laura_Koth/rawcounts_all.txt"
+
+###############################
+# load in the IDs that need to be switched with each other
+dir.list<-list.files(tophat.dir)
+dir.samplenames<-dir.list
+count.table<-numeric()
+result.dirs<-dir.list
+
+for(j in 1:length(result.dirs)){
+
+sample.name<-dir.samplenames[j]
+count.filepath<-file.path(output.dir,paste(sample.name,"_rawcounts.txt",sep=""))
+
+temp<-read.table(count.filepath,sep="\t",header=T,check.names=F)
+rownames(temp)<-temp[,1]
+
+if(j==1){
+anno.matrix<-temp[,1:6]
+count.table<-cbind(count.table,temp[,7])
+gene.names<-anno.matrix[,1]
+}else{
+count.table<-cbind(count.table,temp[gene.names,7])
+}
+}
+
+colnames(count.table)<-dir.samplenames
+cmd.out<-cbind(anno.matrix,count.table)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+```
+
+
+
+## DESeq2 Normalized count
+
+Based on the raw count matrix, we generate the DESeq2 normalized data.
+```{r}
+# In this note, we use DESeq2 to normalize the raw counts
+# These codes can be run both on the HPC and on local machine. 
+# Specification of home.dir decides which machine this is run.
+
+# https://hbctraining.github.io/DGE_workshop/lessons/02_DGE_count_normalization.html
+
+####################################
+# 0. load in the raw count matrix and generate the 
+library(DESeq2)
+home.dir<-"/home/yanxiting/driver_Grace"
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+
+rawcount.filepath<-file.path(home.dir,"scratch60/Laura_Koth/rawcounts_all.txt")
+rawcount.matrix<-read.table(rawcount.filepath,sep="\t",header=T,check.names=F)
+
+annot.matrix<-rawcount.matrix[,1:6]
+data.matrix<-rawcount.matrix[,7:ncol(rawcount.matrix)]
+
+# generate the meta data
+#meta.data<-readRDS(file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS"),refhook = NULL)
+temp.vect<-unname(sapply(colnames(data.matrix),my.element.extract,splitchar="_",index=1))
+temp.vect[temp.vect=="duplicate"]<-"sarcoidosis"
+meta.data<-data.frame(samples=colnames(data.matrix),disease=temp.vect)
+rownames(meta.data)<-colnames(data.matrix)
+# match the row names of meta data and the column names of data.matrix
+meta.data<-meta.data[colnames(data.matrix),]
+
+dds <- DESeqDataSetFromMatrix(countData = data.matrix, colData = meta.data, design = ~ 1)
+#View(counts(dds))
+dds <- estimateSizeFactors(dds)
+sizeFactors(dds)
+
+normalized_counts <- counts(dds, normalized=TRUE)
+
+cmd.out<-cbind(annot.matrix,normalized_counts)
+
+# output the normalized counts
+output.filepath<-file.path(home.dir,"scratch60/Laura_Koth","DESeq2_normalized.txt")
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+output.filepath<-file.path(home.dir,"scratch60/Laura_Koth","DESeq2_normalized.RDS")
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+
+```
+
+
+## TPM (not run)
+First, we calculate the TPMs for each sample separately.
+```{r}
+# These codes need to be run directly on grace HPC.
+star.dir<-"/home/xy48/scratch/Shervin/results_STAR"
+gtf.filepath<-"/home/xy48/scratch_kaminski/public/genomes/Homo_sapiens/UCSC/hg38/Annotation/Archives/archive-current/Genes/genes.gtf"
+folder.names<-list.files(star.dir)
+work.dir<-"/home/xy48/scratch/Shervin"
+source("~/Rprogram/my_functions.R")
+
+
+output.dir<-file.path(work.dir,"results_TPMcalculator_hg38")
+script.dir<-file.path(work.dir,"scripts_TPMcalculator_hg38")
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+if(file.exists(script.dir)==F){
+  dir.create(script.dir)
+}
+
+jobsub.filepath<-file.path(script.dir,"jobsub.bat")
+if(file.exists(jobsub.filepath)){
+  file.remove(jobsub.filepath)
+}
+file.create(jobsub.filepath)
+
+for(i in 1:length(folder.names)){
+
+  temp.name<-my.element.extract(folder.names[i],splitchar="_",index=2)
+  
+  output.subdir<-file.path(output.dir,temp.name)
+  if(file.exists(output.subdir)==F){
+    dir.create(output.subdir)
+  }
+  
+  script.filepath<-file.path(script.dir,paste(temp.name,".sh",sep=""))
+  bam.filepath<-list.files(file.path(star.dir,folder.names[i]))
+  bam.filepath<-bam.filepath[grep("Aligned.sortedByCoord.out.bam",bam.filepath)]
+  bam.filepath<-file.path(star.dir,folder.names[i],bam.filepath)
+  #bam.filepath<-file.path(star.dir,folder.names[i],"Final.STARBowtie2.bam")
+  cmd.out<-"#!/bin/bash\n#SBATCH --partition=day,pi_kaminski\n#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=1\n#SBATCH --mem=49152\n#SBATCH --time=24:00:00\n#SBATCH --mail-type=NONE\n"
+  cmd.out<-paste(cmd.out,"#SBATCH --job-name=",temp.name,"\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --error=",script.filepath,".e%J\n",sep="")
+  cmd.out<-paste(cmd.out,"#SBATCH --output=",script.filepath,".o%J\n",sep="")
+  cmd.out<-paste(cmd.out,"module restore tpmcalculator\n",sep="")
+  cmd.out<-paste(cmd.out,"conda activate rnaseq\n",sep="")
+  cmd.out<-paste(cmd.out,"cd ",output.subdir,"\n",sep="")
+  cmd.out<-paste(cmd.out,"TPMCalculator -g ",gtf.filepath," -b ",bam.filepath,"\n",sep="")
+  cat(cmd.out,file=script.filepath,append=F)
+  
+  cat("sbatch < ",script.filepath,"\n",sep="",file=jobsub.filepath,append=T)
+  system(paste("chmod 700 ",script.filepath,"\n",sep=""))
+}
+system(paste("chmod 700 ",jobsub.filepath,sep=""))
+
+```
+
+
+Second, we merge the TPMs into matrix.
+```{r}
+# These codes need to be run on the grace HPC directly.
+####################################
+# 1. merge the results of TPMs into one big matrix from individual samples
+source("~/Rprogram/my_functions.R")
+output.filepath<-"/home/xy48/scratch/Shervin/TPM_all.txt"
+data.dir<-"/home/xy48/scratch/Shervin/results_TPMcalculator_hg38"
+filenames<-list.files(data.dir)
+
+###############################
+# load in the IDs that need to be switched with each other
+sample.names<-filenames
+gene.names<-character()
+result.list<-list()
+annot.matrix<-character()
+
+for(i in 1:length(filenames)){
+cat("i=",i,"\n",sep="")
+# check if this sample needs to be corrected or not.
+#data.filepath<-file.path(data.dir,filenames[i],"Final.STARBowtie2_genes.out")
+data.filepath<-list.files(file.path(data.dir,filenames[i]))
+temp<-sapply(data.filepath,my.element.extract,splitchar="\\.",index=-1)
+data.filepath<-data.filepath[temp=="out"]
+data.filepath<-file.path(data.dir,filenames[i],data.filepath)
+
+temp<-read.table(data.filepath,sep="\t",comment.char="",header=T,as.is=TRUE,check.names=F)
+rownames(temp)<-paste(temp[,2],":",temp[,1],sep="")
+result.list[[i]]<-temp
+
+temp.names<-setdiff(rownames(temp),gene.names)
+annot.matrix<-rbind(annot.matrix,temp[temp.names,1:5])
+gene.names<-union(gene.names,rownames(temp))
+}
+
+names(result.list)<-sample.names
+
+# generate the TPM matrix
+count.table<-numeric()
+for(i in 1:length(result.list)){
+  count.table<-cbind(count.table,result.list[[i]][gene.names,7])
+}
+count.table[is.na(count.table)]<-0
+colnames(count.table)<-sample.names
+
+
+rownames(annot.matrix)<-paste(annot.matrix[,2],":",annot.matrix[,1],sep="")
+cmd.out<-cbind(annot.matrix[gene.names,],count.table)
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+
+####################################
+# generate the log(TPM+1,base=2)
+output.filepath<-"/home/xy48/scratch/Shervin/log2TPM_all.txt"
+cmd.out<-cbind(annot.matrix[gene.names,],log(count.table+1,base=2))
+write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+
+
+```
+
+
+# PCA analysis
+We first conduct PCA analysis to identify potential outliers in the UCSF cohort.
+```{r}
+# load in the normalized count matrix
+home.dir<-"/home/yanxiting/driver_Grace"
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+
+deseq2.filepath<-file.path(home.dir,"scratch60/Laura_Koth","DESeq2_normalized.RDS")
+my.data<-readRDS(deseq2.filepath,refhook = NULL)
+
+anno.data<-my.data[,1:6]
+rownames(my.data)<-as.matrix(my.data)[,1]
+fpkm.matrix<-my.data[,7:ncol(my.data)]
+
+#log2 transform, if yes, do the analysis on log2(fpkm.matrix+1) to avoid log2(0) transformation
+log2.transform<-T
+if(log2.transform){
+fpkm.matrix<-fpkm.matrix+1
+fpkm.matrix<-log(fpkm.matrix,base=2)
+}
+fpkm<-fpkm.matrix
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(fpkm,1,sd)
+fpkm<-fpkm[temp.sd>0,]
+removed_genes <- rownames(fpkm)[temp.sd<=0] 
+
+#Conduct PCA
+fpkm.norm<-my.normalize(fpkm)
+my.svd<-svd(fpkm.norm)
+cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3],"\n")
+my.projected<-t(fpkm.norm)%*%my.svd$u
+my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
+```
+
+Then we visualize the 3D PCA plot.
+
+```{r eval=TRUE, cache=FALSE, results='hide', webgl=TRUE}
+# visualize the PCA plot in 3D
+library(rgl)
+temp.vect<-unname(sapply(colnames(fpkm),my.element.extract,splitchar="_",index=1))
+temp.vect[temp.vect=="duplicate"]<-"sarcoidosis"
+my.colors<-c(rep("blue",ncol(fpkm)))
+my.colors[temp.vect=="sarcoidosis"]<-"red"
+open3d()
+par3d(windowRect=c(300,300,300,300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(fpkm),n=ncol(fpkm),plot=TRUE)
+
+rglwidget()
 ```
