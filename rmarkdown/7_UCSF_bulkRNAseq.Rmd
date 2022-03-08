@@ -527,7 +527,7 @@ Based on the raw count matrix, we generate the DESeq2 normalized data.
 ####################################
 # 0. load in the raw count matrix and generate the 
 library(DESeq2)
-home.dir<-"/home/xy48"
+home.dir<-"/home/yanxiting/driver_Grace"
 source(file.path(home.dir,"Rprogram/my_functions.R"))
 
 rawcount.filepath<-file.path(home.dir,"scratch60/Laura_Koth/rawcounts_all.txt")
