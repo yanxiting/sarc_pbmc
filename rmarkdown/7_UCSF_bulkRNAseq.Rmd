@@ -40,8 +40,8 @@ figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
 table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
 figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 
-home.dir<-"/home/yanxiting/driver_Grace"
-#home.dir<-"/home/xy48"
+#home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
 source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
 ```
@@ -525,7 +525,7 @@ Based on the raw count matrix, we generate the DESeq2 normalized data.
 ####################################
 # 0. load in the raw count matrix and generate the 
 library(DESeq2)
-home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
 source(file.path(home.dir,"Rprogram/my_functions.R"))
 
 rawcount.filepath<-file.path(home.dir,"scratch60/Laura_Koth/rawcounts_all.txt")
@@ -687,7 +687,7 @@ write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names
 We first conduct PCA analysis to identify potential outliers in the UCSF cohort.
 ```{r}
 # load in the normalized count matrix
-home.dir<-"/home/yanxiting/driver_Grace"
+home.dir<-"/home/xy48"
 source(file.path(home.dir,"Rprogram/my_functions.R"))
 
 deseq2.filepath<-file.path(home.dir,"scratch60/Laura_Koth","DESeq2_normalized.RDS")
@@ -732,5 +732,5 @@ par3d(windowRect=c(300,300,300,300))
 plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
 identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(fpkm),n=ncol(fpkm),plot=TRUE)
 
-rglwidget()
+#rglwidget()
 ```
