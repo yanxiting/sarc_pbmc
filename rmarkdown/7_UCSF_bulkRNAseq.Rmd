@@ -674,6 +674,8 @@ rownames(annot.matrix)<-paste(annot.matrix[,2],":",annot.matrix[,1],sep="")
 cmd.out<-cbind(annot.matrix[gene.names,],count.table)
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 
+output.filepath<-"/home/xy48/scratch60/Laura_Koth/TPM_all.RDS"
+saveRDS(cmd.out,file = output.filepath,refhook = NULL)
 
 ####################################
 # generate the log(TPM+1,base=2)
@@ -681,6 +683,8 @@ output.filepath<-"/home/xy48/scratch60/Laura_Koth/log2TPM_all.txt"
 cmd.out<-cbind(annot.matrix[gene.names,],log(count.table+1,base=2))
 write.table(cmd.out,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
 
+output.filepath<-"/home/xy48/scratch60/Laura_Koth/log2TPM_all.RDS"
+saveRDS(cmd.out,file=output.filepath,refhook = NULL)
 
 ```
 
