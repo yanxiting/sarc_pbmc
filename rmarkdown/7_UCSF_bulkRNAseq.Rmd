@@ -744,7 +744,8 @@ temp.data<-data.frame(expr=as.vector(as.matrix(fpkm)),samples=as.vector(temp.nam
 p <- ggplot(temp.data, aes(x=samples, y=expr)) + 
   geom_boxplot()+ 
   theme(axis.text.x=element_text(angle=90)) +
-  xlab("log2(DESeq2+1)")
+  xlab("samples") +
+  ylab("log2(DESeq2+1)")
 #boxplot(as.vector(as.matrix(fpkm))~as.vector(temp.names))
 p
 output.filepath<-file.path(home.dir,"scratch60/Laura_Koth","boxplot_persample_log2DESeq2.pdf")
@@ -1483,13 +1484,13 @@ rglwidget()
 
 
 ## Outliers deleted
-We observed that the boxplot of the log2(TPM+1) or log2(DESeq2+1) show the variation across samples better. Especially, the boxplot of Log2(DESeq2+1) did demonstrate some extreme samples (sarcoidosis_X235). So we did one round of sample filtering based on the log2(DESeq2+1) PCA plot. Here are the samples filtered out:
+In the first round, we observed that the boxplot of the log2(TPM+1) or log2(DESeq2+1) show the variation across samples better. Especially, the boxplot of Log2(DESeq2+1) did demonstrate some extreme samples (sarcoidosis_X235). So we did one round of sample filtering based on the log2(DESeq2+1) PCA plot. Here are the samples filtered out:
 
-* 
+* sarcoidosis_X235
+
+In the second round, we removed the following samples:
 
 
-
-In summary, we deleted the following outliers based on the DESeq2(no log2) and TPM(log2) PCA analysis results.
 
 ```{r}
 # load in the normalized count matrix
@@ -1504,7 +1505,7 @@ rownames(my.data)<-as.matrix(my.data)[,1]
 fpkm.matrix<-my.data[,7:ncol(my.data)]
 
 #log2 transform, if yes, do the analysis on log2(fpkm.matrix+1) to avoid log2(0) transformation
-log2.transform<-F
+log2.transform<-T
 if(log2.transform){
 fpkm.matrix<-fpkm.matrix+1
 fpkm.matrix<-log(fpkm.matrix,base=2)
@@ -1523,11 +1524,30 @@ cat("The cumulative proportion of variation explained by the top 3 PCs:\n",cumsu
 my.projected<-t(fpkm.norm)%*%my.svd$u
 my.distance<-dist(my.projected, method = "euclidean", diag = FALSE, upper = FALSE)
 
-hist(my.projected[,1],breaks=500)
+hist(my.projected[,1],breaks=100)
+```
+The PCA plot is shown below.
 
-cat(rownames(my.projected)[my.projected[,1]>0 | my.projected[,1]< -100],sep="\n")
+```{r fig.width=8,fig.height=8,eval=TRUE, cache=FALSE, results='hide', webgl=TRUE}
+# visualize the PCA plot in 3D
+library(rgl)
+temp.vect<-unname(sapply(colnames(fpkm),my.element.extract,splitchar="_",index=1))
+temp.vect[temp.vect=="duplicate"]<-"sarcoidosis"
+my.colors<-c(rep("blue",ncol(fpkm)))
+my.colors[temp.vect=="sarcoidosis"]<-"red"
+open3d()
+par3d(windowRect=c(300,300,300,300))
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=0.6,box = F,axes = T)
+identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(fpkm),n=ncol(fpkm),plot=TRUE)
+rglwidget()
+```
+
+
+
+```{r}
+cat(rownames(my.projected)[my.projected[,1]>5 | my.projected[,1]< -200],sep="\n")
 temp<-rownames(my.projected)[my.projected[,1]>0 | my.projected[,1]< -100]
-output.filepath<-file.path(home.dir,"scratch60/Laura_Koth","DESeq2_nolog2_outlierlist.RDS")
+output.filepath<-file.path(home.dir,"scratch60/Laura_Koth","DESeq2_log2_outlierlist.RDS")
 saveRDS(temp,file=output.filepath,refhook = NULL)
 cat("\nThe list of outliers has been saved in ",output.filepath,"\n",sep="")
 ```
