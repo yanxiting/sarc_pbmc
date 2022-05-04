@@ -364,6 +364,18 @@ temp<-my_gsea_filecreate_binary(fpkm.matrix=fpkm.data,
                           suffix.name="analysis1b"
                           )
 
+# analysis 1c
+varnames<-c("CXR_stage")
+temp<-my_gsea_filecreate_binary(fpkm.matrix=fpkm.data,
+                          clinic.matrix = clinic.data,
+                          fpkm.matrix.anno = anno.data,
+                          var.names = varnames,
+                          group1.values = data.frame(CXR_stage=c("0","1")),
+                          group2.values = data.frame(PHENGRP=c("2","3","4")),
+                          output.dir=output.folder,
+                          suffix.name="analysis1c"
+                          )
+
 ```
 
 Here's a table showing the breakdown of the patients based on CXR_stage.
@@ -1341,7 +1353,110 @@ We generate input files for the differential expressed genes between nonacute st
 ```{r}
 # note this function is slightly different for DESeq2 Norm data and the TPM matrix
 #my_gsea_filecreate_binary<-function(fpkm.filepath,clinic.filepath,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
+
 my_gsea_filecreate_binary<-function(fpkm.matrix,clinic.matrix,fpkm.matrix.anno,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
+  #####################################################################################################################################################
+  # Arguments:
+  # 
+  # gexp.filepath is the file path of the TPM matrix with first 5 columns being annotation for genes 
+  # (TPM_baseline_276_clean_celldiffadjusted_withannot.txt).
+  # 
+  # clinic.filpath is the file path of the clinic data (clinic_matrix_merged.txt). The first row needs to be the column names.
+  # 
+  # var.names is a vector containing the names of columns in clinic.filepath that you want to generate the phenotype file for.
+  #
+  # group1.values is a data.frame of string describing values of var.names that are considered as gorup 1. 
+  # For example, group1.values=data.frame(PHENGRP="nonacute Stage I untreated"). Note that the columns in group1.values need to match those in var.names if there are
+  # more than 1 variable to define the groups.
+  #
+  # group2.values has the same format as group1.values but is the settings for group2.
+  #
+  # group1.name is the name you want to call your group1 in the cls file.
+  #
+  # group2.name is the name you want to call your group2 in the cls file.
+  # 
+  # output.dir is the folder name where you want to save the created files.
+  #
+  # suffix.name is the suffix name in the name of the output files. The gct file will be named as gct_suffix.name.gct and cls file will be named as
+  # cls_suffix.name.gct. For example, if suffix.name="test", the gct file will be named "gct_test.gct" and the cls file will be named as 
+  # "cls_test.cls".
+  # 
+  # Value:
+  #
+  # This function will return 0 if successfully ran. Otherwise, it will return 1. If unsuccessful, information regarding what went wrong will be spit 
+  # out as warning messages.
+  #
+  # When ran successfully, this function will create two files under the specified output.dir named gct_var.name.gct and cls_var.name.cls, where 
+  # var.name will be the speficied value 
+  # in the argument. These two files can be directly loaded into GSEA together with another gene set file that needs to be generated outside of this 
+  # function.
+  #####################################################################################################################################################
+  
+  #  generate the gene expression matrix input file for GSEA
+  #fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+  #clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+  #output.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes"
+  # suffix.name<-"analysis1"
+  
+  
+  # load in the fpkm matrix
+  #fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+  #fpkm.matrix.anno<-fpkm.matrix[,1:6]
+  #fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+  
+  # load in the clinical data and subset the samples to those listed in the fpkm.matrix
+  #clinic.matrix=read.table(clinic.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F)
+  #rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+  clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+  # based on var.name, group1.values, and group2.values, identify the samples to include in the files.
+  if(file.exists(output.dir)==F){
+    dir.create(output.dir)
+  }
+  
+  gct.filepath<-file.path(output.dir,paste("gexp_",suffix.name,".gct",sep=""))
+  cls.filepath<-file.path(output.dir,paste("cls_",suffix.name,".cls",sep=""))
+  
+  gct.filepath.2<-file.path(output.dir,paste("gexp_",suffix.name,"_withID.gct",sep=""))
+  cls.filepath.2<-file.path(output.dir,paste("cls_",suffix.name,"_withID.cls",sep=""))
+  
+  # substract samples with var.name equal to the values in group1.values and group2. values
+  temp1<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group1.values,1,paste,collapse="_")]
+  #cat("\n")
+  #cat(apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_"))
+  #cat("\n")
+  temp2<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group2.values,1,paste,collapse="_")]
+  cat("There are ",ncol(temp1)," and ", ncol(temp2)," samples for group1 and group2, respectively.\n")
+  data.matrix<-cbind(temp1,temp2)
+  data.matrix.id<-colnames(data.matrix)
+  data.matrix<-cbind(fpkm.matrix.anno[,1],rep("na",nrow(data.matrix)),data.matrix)
+  colnames(data.matrix)[1:2]<-c("NAME","Description")
+  pheno.vect<-c(rep(0,ncol(temp1)),rep(1,ncol(temp2)))
+  data.matrix.pheno<-clinic.matrix[data.matrix.id,]  
+  # output the gene expression data
+  cmd.out<-"#1.2\n"
+  cmd.out<-paste(cmd.out,nrow(data.matrix),"\t",ncol(data.matrix)-2,"\n",sep="")
+  cat(cmd.out,file=gct.filepath,append=F)
+  write.table(data.matrix,sep="\t",file=gct.filepath,append=T,row.names=F,col.names=T,quote=F)
+  
+  #write.table(data.matrix,sep="\t",file=gct.filepath.2,append=F,row.names=T,col.names=T,quote=F)
+  
+  # output the phenotype file
+  cmd.out<-paste(ncol(data.matrix)-2," ",2," ",1,"\n",sep="")
+  cmd.out<-paste(cmd.out,"# group1 group2\n",sep="")
+  cat(cmd.out,file=cls.filepath,append=F,sep="")
+  cat(pheno.vect,file=cls.filepath,append=T,sep=" ")
+  
+  # output the whole clinic data
+  write.table(data.matrix.pheno,file=cls.filepath.2,append=F,sep="\t",row.names = T,col.names=T,quote=F)
+  
+  results<-list(group1=temp1,group2=temp2)
+  
+  return(results)
+}
+
+
+my_gsea_filecreate_binary_old<-function(fpkm.matrix,clinic.matrix,fpkm.matrix.anno,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
   #####################################################################################################################################################
   # Arguments:
   # 
@@ -1466,7 +1581,7 @@ temp<-my_gsea_filecreate_binary(fpkm.matrix=fpkm.data,
                           suffix.name="analysis1b"
                           )
 
-# analysis 1b
+# analysis 1c
 varnames<-c("CXR_stage")
 temp<-my_gsea_filecreate_binary(fpkm.matrix=fpkm.data,
                           clinic.matrix = clinic.data,
