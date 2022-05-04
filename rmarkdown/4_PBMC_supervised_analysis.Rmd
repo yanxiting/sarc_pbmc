@@ -1411,7 +1411,6 @@ write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
 ```
 
-
 Steroid vs non-steroid usage patients:
 ```{r}
 # comparing:
@@ -1451,6 +1450,50 @@ write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 # describe how many genes pass the FDR threshold
 cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
 ```
+
+Stage I vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Non-acute, Stage I, untreated vs c("Stage II-III, untreated","Stage IV, untreated")
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Stage-II-III-untreated","Stage-IV-untreated")]<-"Stage-II-IV-untreated"
+
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non-acute-Stage-I-untreated","Stage-II-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non-acute-Stage-I-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
 
 ## edgeR
 We identify the differentially expressed genes between give groups of subjects using edgeR.
