@@ -1,21 +1,23 @@
 ---
-title: "EdgeR on bulk RNAseq data"
+title: "Supervised Analysis"
 author: "Xiting Yan"
-date: "05/25/2021"
-output:
+date: "11/29/2020"
+output: 
   html_notebook:
-    code_folding: hide
-    fig_caption: yes
-    highlight: tango
-    number_sections: no
     theme: united
-    toc: yes
+    highlight: tango
+    toc: true
     toc_depth: 6
-    toc_float: yes
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    fig_caption: true
+    #bibliography: bibliography.bib
+    #csl: biomed-central.csl
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='hold',cache.lazy = FALSE)
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE,warning=FALSE,message = FALSE,results='markup',cache.lazy = FALSE)
 knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
 
 library(kableExtra)
@@ -26,7 +28,7 @@ library(nlme)
 library(rgl)
 library(gplots)
 
-knitr::knit_hooks$set(webgl = hook_webgl)
+knit_hooks$set(webgl = hook_webgl)
 
 
 table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
@@ -38,424 +40,1606 @@ figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
 
 table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
 figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
+# This rmd file is compiled on xiting's laptop. If needed to be compiled on a different machine, the file path will need to be changed.
 
 home.dir<-"/home/yanxiting/driver_Grace"
-work.dir<-file.path(home.dir,"scratch","Shervin")
-my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
 ```
 
+# Method
+To identify gene signatures associated with clinical traits in a supervised way, we conducted the supervised analysis to identify gene signatures associated with each given traits, including the phenotypes, demographics, PFTs and other clinical traits of sarcoidosis.
 
-# Background
+# DESeq2
+We identify the differentially expressed genes between give groups of subjects using DESeq2.
 
-For Shervin's data, we found that the Ribo depletion protocol and the PolyA enrichment protocol has a huge difference in the generated data. So we decided to identify the differentially expressed genes within each protocol first. Especially, in this project, we wanted to identify differentially expressed genes:
+## all sample
 
-* DEGs between smokers and non-smokers
-* DEGs between paired tumor and normal samples
-
-The sample size of this study is toward the low end and it includes two different protocols, which usually would generate very different data. So before any analysis, we take a look at the breakdown of samples between the two protocols (polyA and RiboD), smoking status (never, former and current) and disease (normal and tumor). Note that each subject has both normal and tumor. 
+First, we use all samples except X235 based on the PCA analysis.
 
 ```{r}
-############################################
-# 2. load in the phenotype data that contain the group and covariate info
-pheno.filepath<-"/home/yanxiting/driver_Grace/scratch/Shervin/pheno_data/phenotype_updated.txt"
-pheno.matrix<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
-# add the subject ID column
-temp.vect<-sapply(pheno.matrix[,1],my.element.remove,splitchar="",index=-1)
-pheno.matrix<-cbind(pheno.matrix,temp.vect)
-colnames(pheno.matrix)[ncol(pheno.matrix)]<-"Subject"
+library(DESeq2)
+library(apeglm)
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth","rawcounts_all.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/data/cxr_merge_ucsf_seq.xlsx")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/DEGs/DESeq2")
+
+# load in the raw counts matrix
+count.matrix<-read.table(count.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+
+# remove some outliers
+count.matrix<-count.matrix[,colnames(count.matrix)!="sarcoidosis_X235"]
+count.matrix<-count.matrix[,colnames(count.matrix)!="duplicate_X118"]
+
+# loading the clinic data and match it with the raw count matrix
+clinic.matrix<-read.xlsx(data.filepath,sheetIndex = 1,check.names=F,stringsAsFactors=FALSE)
+#clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+rownames(clinic.matrix)<-clinic.matrix$sample_names
+
+temp.names<-intersect(rownames(clinic.matrix),colnames(count.matrix))
+clinic.matrix<-clinic.matrix[temp.names,]
+count.matrix<-count.matrix[,temp.names]
+
+# replace space in the PHENGRP values with -
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="-")
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="-")
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="--",replace="-")
+```
 
 
-cat("Breakdown of disease and protocols:\n")
-table(pheno.matrix$Subject,pheno.matrix$Protocol)
+Stage I, untreated vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$CXR_stage%in%c(1,2,3,4),]
+my.coldata$CXR_stage[my.coldata$CXR_stage%in%c(2,3,4)]<-2
+my.coldata$CXR_stage<-factor(my.coldata$CXR_stage,levels=c(1,2))
+my.coldata$CXR_stage <- relevel(my.coldata$CXR_stage, ref = 1)
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ CXR_stage)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef="CXR_stage_2_vs_1", type="apeglm")
 
-cat("Breakdown of smoking status and protocols:\n")
-table(pheno.matrix$Smoker,pheno.matrix$Protocol)
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05)," genes with FDR<0.05.\n",sep="")
+```
+
+## no outliers
+
+Second, we use samples without outliers based on the PCA analysis.
+
+```{r}
+library(DESeq2)
+library(apeglm)
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth","rawcounts_all.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/data/cxr_merge_ucsf_seq.xlsx")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/DEGs/DESeq2")
+
+outliers.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/DESeq2_log2_outlierlist.RDS")
+
+
+# load in the raw counts matrix
+count.matrix<-read.table(count.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+
+# remove some outliers
+#count.matrix<-count.matrix[,colnames(count.matrix)!="sarcoidosis_X235"]
+count.matrix<-count.matrix[,colnames(count.matrix)!="duplicate_X118"]
+outlier.list<-readRDS(outliers.filepath,refhook = NULL)
+count.matrix<-count.matrix[,!colnames(count.matrix)%in%outlier.list]
+
+# loading the clinic data and match it with the raw count matrix
+clinic.matrix<-read.xlsx(data.filepath,sheetIndex = 1,check.names=F,stringsAsFactors=FALSE)
+#clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+rownames(clinic.matrix)<-clinic.matrix$sample_names
+
+temp.names<-intersect(rownames(clinic.matrix),colnames(count.matrix))
+clinic.matrix<-clinic.matrix[temp.names,]
+count.matrix<-count.matrix[,temp.names]
+
+# replace space in the PHENGRP values with -
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="-")
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="-")
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="--",replace="-")
+```
+
+
+Stage I, untreated vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$CXR_stage%in%c(1,2,3,4),]
+my.coldata$CXR_stage[my.coldata$CXR_stage%in%c(2,3,4)]<-2
+my.coldata$CXR_stage<-factor(my.coldata$CXR_stage,levels=c(1,2))
+my.coldata$CXR_stage <- relevel(my.coldata$CXR_stage, ref = 1)
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ CXR_stage)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef="CXR_stage_2_vs_1", type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05)," genes with FDR<0.05.\n",sep="")
+```
+
+# left-over codes
+
+Stage II-III, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage-II-III-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage-II-III-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef="PHENGRP_Stage.IV.untreated_vs_Stage.II.III.untreated", type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05)," genes with FDR<0.05.\n",sep="")
+```
+
+Stage I, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non-acute-Stage-I-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non-acute-Stage-I-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+Stage I & II-III, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated")]<-"Stage-I-II-III-untreated"
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage-I-II-III-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage-I-II-III-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+
+Acute sarcoid, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Acute-Sarcoidosis-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Acute-Sarcoidosis-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Acute-Sarcoidosis-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+Steroid vs non-steroid usage patients:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix[!is.na(clinic.matrix$steroid_atv1),]
+my.coldata$steroid_atv1<-factor(my.coldata$steroid_atv1,levels=c(0,1))
+my.coldata$steroid_atv1 <- relevel(my.coldata$steroid_atv1, ref = "0")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ steroid_atv1)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+Stage I vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Non-acute, Stage I, untreated vs c("Stage II-III, untreated","Stage IV, untreated")
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Stage-II-III-untreated","Stage-IV-untreated")]<-"Stage-II-IV-untreated"
+
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non-acute-Stage-I-untreated","Stage-II-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non-acute-Stage-I-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+
+
+## edgeR
+We identify the differentially expressed genes between give groups of subjects using edgeR.
+
+
+## original data (not ran)
+
+### Data Loading
+First, we load in the fpkm and the clinical data.
+```{r}
+
+#########
+# This part comes from 209_local_data_load_AM_XYversion.R
+#this code loads the 209 BAL samples into the same variable names as clean_data_load.R
+source(file.path(home.dir,"/Rprogram/my_functions.R"))
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+
+########################################
+# load in the fpkm matrix
+fpkm.matrix.clean<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+rownames(fpkm.matrix.clean)<-paste(fpkm.matrix.clean[,1],"_",fpkm.matrix.clean[,2],sep="") # some genes have >1 isoforms due to two different annotations on two different chromosomes.
+anno.matrix<-fpkm.matrix.clean[,1:5]
+fpkm.matrix.clean<-fpkm.matrix.clean[,6:ncol(fpkm.matrix.clean)]
+fpkm.matrix.clean<-as.matrix(fpkm.matrix.clean)
+
+########################################
+# load in the clinical data extracted from the database.
+
+# clinical traits provided by Laura
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-clinic.matrix[,1]
+
+# load in the CT scan reads and merge them into the clinical data
+ct.matrix<-read.xls(ct.filepath,stringsAsFactors=F)
+rownames(ct.matrix)<-ct.matrix[,1]
+ct.matrix<-ct.matrix[,c("Med_Lymphadenopathy","Hilar_Lymphadenopathy","Micronodule","Bronchial_Wall_Thickening","Traction_Bronchiectasis","Bronchiectasis_severity","Ground_Glass","Honeycombing","Reticular_Abnormality","Pulmonary_Art","Tree_in_bud")]
+ct.matrix<-ct.matrix[rownames(clinic.matrix),]
+rownames(ct.matrix)<-rownames(clinic.matrix)
+clinic.matrix<-cbind(clinic.matrix,ct.matrix)
+
+# only do this for the traits included in the BAL analysis
+clinic.matrix.bal<-read.table(file.path(work.dir,"scratch/GRADS/SARC_results/Data/SARC_combine_clinical_data20170814.txt"),sep="\t",header=T,check.names=F,stringsAsFactors=F,quote="")
+my.clinic.matrix<-clinic.matrix[,colnames(clinic.matrix)%in%colnames(clinic.matrix.bal)]
+my.clinic.matrix<-cbind(my.clinic.matrix,clinic.matrix[,c("p_total","p_mono","p_neut","p_eos","p_baso","p_lymph","abs_lymph")])
+
+# add the FEV1/FVC ratio
+my.clinic.matrix<-cbind(my.clinic.matrix,my.clinic.matrix[,"BDFEV1"]/my.clinic.matrix[,"BDFVC"])
+colnames(my.clinic.matrix)[ncol(my.clinic.matrix)]<-"FEV1FVCratio"
+
+# output the merged clinical data matrix into a file.
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data_PBMC/SARC_combine_clinical_data20210112.xlsx")
+write.xlsx(my.clinic.matrix,file=output.filepath,row.names=T,col.names=T,append=F)
+cat("The combined clinical data has been saved as ",output.filepath,"\n",sep="")
+
+# match the clinical data with the columns in the fpkm matrix
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+
+# add the obstructive vs. restrictive variable FEV1FVCratio=0 is obstructive and =1 is restrictive
+#temp.vect<-rep(NA,nrow(clinic.matrix))
+#temp.vect[!is.na(clinic.matrix[,"FEV1FVCratio"]) & clinic.matrix[,"FEV1FVCratio"]<0.7]<- 0
+#temp.vect[(!is.na(clinic.matrix[,"FEV1FVCratio"]) & clinic.matrix[,"FEV1FVCratio"]>=0.7) & (clinic.matrix[,"FVCPRED"]<80 & clinic.matrix[,"FVCPRED"]>=0)]<- 1
+#clinic.matrix<-cbind(clinic.matrix,temp.vect)
+#colnames(clinic.matrix)[ncol(clinic.matrix)]<-"FEV1FVCratioBinary"
+
+# add the obstructive vs. normal variable obstractiveBinary=0 is normal and =1 is obstructive
+#temp.vect<-rep(NA,nrow(clinic.matrix))
+#temp.vect[(!is.na(clinic.matrix[,"FEV1FVCratio"]) & clinic.matrix[,"FEV1FVCratio"]<0.7)]<- 1
+#temp.vect[(!is.na(clinic.matrix[,"FEV1FVCratio"]) & clinic.matrix[,"FEV1FVCratio"]>0.7) & (clinic.matrix[,"FVCPRED"]>80 & clinic.matrix[,"FVCPRED"]>=0)]<- 0
+#clinic.matrix<-cbind(clinic.matrix,temp.vect)
+#colnames(clinic.matrix)[ncol(clinic.matrix)]<-"obstructiveBinary"
+
+
+
+# add the restrictive vs. normal variable restrictiveBinary=0 is normal and =1 is restrictive
+#temp.vect<-rep(NA,nrow(clinic.matrix))
+#temp.vect[(!is.na(clinic.matrix[,"FEV1FVCratio"]) & clinic.matrix[,"FEV1FVCratio"]>0.7) & (clinic.matrix[,"FVCPRED"]<80 & clinic.matrix[,"FVCPRED"]>=0)]<- 1
+#temp.vect[(!is.na(clinic.matrix[,"FEV1FVCratio"]) & clinic.matrix[,"FEV1FVCratio"]>0.7) & (clinic.matrix[,"FVCPRED"]>80 & clinic.matrix[,"FVCPRED"]>=0)]<- 0
+#clinic.matrix<-cbind(clinic.matrix,temp.vect)
+#colnames(clinic.matrix)[ncol(clinic.matrix)]<-"restrictiveBinary"
+cat("The dimension of the clinical data is\n",paste(dim(my.clinic.matrix),collapse=" "),"\n",sep="")
+```
+
+Second, we conduct the supervised analysis to identify genes associated with the given traits extracted above.
+
+### Continuous traits
+* Function to do the test for continuous tratis.
+```{r}
+#########
+# This part comes from hg38_Supervised_analysis_AM_XYversion.R
+################################
+# 4.4. Identify genes associated with age and PFTs
+#source("/home/fas/kaminski/am2952/scratch/SARC215/0_CleanDataLoad.R")
+#source(file.path(work.dir,"Rprogram/209_local_data_load_AM.R")
+
+my.con.cor<-function(fpkm.matrix.clean,feature.name="AGE",method.name="spearman",tissue.name="BAL",clinic.matrix,output.dir){
+
+# fpkm.matrix.clean needs to have column names as GRADS IDs
+# clinic.matrix needs to have row names as GRADS IDs 
+temp.names<-intersect(colnames(fpkm.matrix.clean),rownames(clinic.matrix))
+data.matrix<-fpkm.matrix.clean[,temp.names]
+clinic.matrix<-clinic.matrix[temp.names,]
+bal.fpkm<-data.matrix
+
+# generate the clinical matrix
+my.clinic.matrix<-clinic.matrix[colnames(data.matrix),]	
+
+clinic.vect<-as.numeric(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name])
+clinic.vect[clinic.vect<0]<-NA
+
+# generate the correlation results
+age.pvalue<-apply(bal.fpkm,1,my.cor.test,y=clinic.vect,method.name=method.name)
+age.pvalue<-matrix(unlist(age.pvalue),ncol=2,byrow=T)
+colnames(age.pvalue)<-c("pvalue","corr_coef")
+age.fdr<-p.adjust(age.pvalue[,"pvalue"],method="fdr")
+age.pvalue<-cbind(age.pvalue,age.fdr)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fdr"
+rownames(age.pvalue)<-rownames(bal.fpkm)
+
+fpkm.info<-apply(bal.fpkm>0,1,sum)
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>0.1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,median))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,mean))
+colnames(fpkm.info)<-c("fpkm>0_num","fpkm>0.1_num","fpkm>1_num","fpkm_median","fpkm_mean")
+
+
+if(file.exists(output.dir)==F){
+cat("WARNING: output.dir doesn't exists!\n")
+return(1)
+}
+
+cmd.out<-cbind(age.pvalue,fpkm.info)
+output.filepath<-file.path(output.dir,paste("correlation_",method.name,"_",feature.name,"_allgenes_",tissue.name,".txt",sep=""))
+cat("gene_names\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+output.filepath<-file.path(output.dir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,".txt",sep=""))
+cat("gene_names\t",file=output.filepath,append=F)
+#write.table(age.pvalue[!is.na(age.pvalue[,3]) & age.pvalue[,3]<0.05,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+write.table(cmd.out[!is.na(age.pvalue[,3]) & age.pvalue[,3]<0.05,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+output.filepath<-file.path(output.dir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_both_metacore.txt",sep=""))
+cat("gene_names\tintensity\n",file=output.filepath,append=F)
+sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,3]) & age.pvalue[,3]<0.05]
+sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+sig.genes<-unique(sig.genes)
+cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+
+
+output.filepath<-file.path(output.dir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_positive_metacore.txt",sep=""))
+cat("gene_names\tintensity\n",file=output.filepath,append=F)
+sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,3]) & age.pvalue[,3]<0.05 & age.pvalue[,2]>0]
+sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+sig.genes<-unique(sig.genes)
+cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+
+
+output.filepath<-file.path(output.dir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_negative_metacore.txt",sep=""))
+cat("gene_names\tintensity\n",file=output.filepath,append=F)
+sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,3]) & age.pvalue[,3]<0.05 & age.pvalue[,2]<0]
+sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+sig.genes<-unique(sig.genes)
+cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+
+return(0)
+}
+```
+
+* Apply the function above to the continuous traits
+```{r}
+# for age
+#output.dir<-"~/driver_Naftali/GRADS/SARC_results/Results_summary/PFTs_correlated_genes"
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Demographics_correlated_genes"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="AGE",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="GENDER",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="RACE",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"RACE"]%in%c(1,2),],output.dir)
+
+
+# for FVC, FEV1 and DLCO
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/PFTs_correlated_genes"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+my.con.cor(fpkm.matrix.clean,feature.name="BDFVC",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="POSTFVC",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="FVCPRED",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="BDFEV1",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="POSTFEV1",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="FEV1PRED",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="BDDLCO",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="PREDDLCO",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+my.con.cor(fpkm.matrix.clean,feature.name="FEV1FVCratio",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir)
+
+
+# for scadding treated as a continuous variable, potentially more reasonable than DEGs
+#output.dir<-"~/driver_Naftali/GRADS/SARC_results/Results_summary/Disease_correlated_genes"
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Disease_correlated_genes"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+my.con.cor(fpkm.matrix.clean,feature.name="SCADDING",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir) 
+
+
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/CellDifferentials_correlated_genes"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_total",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_mono",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_neut",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_eos",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_baso",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_lymph",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="p_lymph",method.name="spearman",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,output.dir=output.dir)
+
 
 ```
 
-## Observations
-Based on our breakdown tables, we have the following observations:
+### Categorical traits
+* Function to do the test for categorical traits.
+```{r}
+my.cat.cor<-function(fpkm.matrix.clean,feature.name="GENDER",method.name="wilcox",tissue.name="BAL",clinic.matrix,outputdir){
 
-* There's no subject with normal and tumor in different protocols.
-* In polyA protocol, there are 1:1:3 subjects from current:former:never which makes the comparison between different smoking status difficult.
-* In RiboD protocol, there are 2:2:0 subjects from current:former:never so comparison between current and former smokers is reasonable but with only 2 subjects per smoking status.
+# extract the fpkm matrix for the given tissue
+temp.names<-intersect(colnames(fpkm.matrix.clean),rownames(clinic.matrix))
+data.matrix<-fpkm.matrix.clean[,temp.names]
+clinic.matrix<-clinic.matrix[temp.names,]
+bal.fpkm<-data.matrix
 
-```{r data_loading}
-library(edgeR)
-############################################
-# 1. load in the gene expression data
-source(file.path(home.dir,"Rprogram","my_functions.R"))
-data.filepath<-file.path(home.dir,"scratch/Shervin/rawcounts_all.txt")
-output.dir<-file.path(home.dir,"scratch/Shervin/edgeR")
+# generate the clinical matrix
+my.clinic.matrix<-clinic.matrix[colnames(data.matrix),]	
+
+clinic.vect<-as.numeric(as.factor(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name]))
+if(length(table(clinic.vect))!=2){
+cat("ERROR: the phenotype does not have two levels!\n")
+return(1)
+}
+
+cat(feature.name,": baseline=",sort(unique(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name]),decreasing = F)[1],"\n",sep="")
+
+# generate the correlation results
+x1<-bal.fpkm[,!is.na(clinic.vect) & clinic.vect==as.numeric(names(table(clinic.vect))[1])]
+x2<-bal.fpkm[,!is.na(clinic.vect) & clinic.vect==as.numeric(names(table(clinic.vect))[2])]
+
+#age.pvalue<-apply(bal.fpkm,1,my.cor.test,y=clinic.vect,method.name=method.name)
+age.pvalue.direct<-apply(cbind(x1,x2),1,my.wilcox,n=ncol(x1))
+age.pvalue<-abs(age.pvalue.direct)
+
+#age.pvalue<-matrix(unlist(age.pvalue),ncol=2,byrow=T)
+age.pvalue<-cbind(age.pvalue,rep(NA,length(age.pvalue)))
+colnames(age.pvalue)<-c("pvalue","corr_coef")
+age.fdr<-p.adjust(age.pvalue[,"pvalue"],method="fdr")
+age.pvalue<-cbind(age.pvalue,age.fdr)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fdr"
+rownames(age.pvalue)<-rownames(bal.fpkm)
+temp.fold<-apply(x1,1,mean,na.rm=T)/apply(x2,1,mean,na.rm=T)
+age.pvalue<-cbind(age.pvalue,temp.fold)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fold_change"
+
+age.pvalue<-cbind(age.pvalue,age.pvalue.direct)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"pval_dir"
+
+
+fpkm.info<-apply(bal.fpkm>0,1,sum)
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>0.1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,median))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,mean))
+colnames(fpkm.info)<-c("fpkm>0_num","fpkm>0.1_num","fpkm>1_num","fpkm_median","fpkm_mean")
+
+
+if(file.exists(outputdir)==F){
+cat("WARNING: output.dir doesn't exists!\n")
+return(1)
+}
+
+cmd.out<-cbind(age.pvalue,fpkm.info)
+output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_allgenes_",tissue.name,".txt",sep=""))
+cat("gene_names\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+
+if(sum(!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05)==0){
+  # When there's nothing that pass the FDR threshold, we use the threshold of p value<0.05 & fold change >2
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+
+  cmd.out<-cbind(age.pvalue,fpkm.info)
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,".txt",sep=""))
+  cat("gene_names\t",file=output.filepath,append=F)
+  write.table(cmd.out[sig.genes,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_both_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_positive_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-sig.genes[age.pvalue[sig.genes,"pval_dir"]>0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_negative_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-sig.genes[age.pvalue[sig.genes,"pval_dir"]<0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)  
+  
+}else{
+  # if there are anything significant with FDR<0.05
+  cmd.out<-cbind(age.pvalue,fpkm.info)
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,".txt",sep=""))
+  cat("gene_names\t",file=output.filepath,append=F)
+  write.table(cmd.out[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_both_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_positive_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05 & age.pvalue[,"pval_dir"]>0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_negative_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05 & age.pvalue[,"pval_dir"]<0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+}
+return(0)
+}
+```
+
+* Apply the function to binary traits.
+```{r}
+#output.dir<-"/home/fas/kaminski/am2952/scratch/SARC209clean/Results_summary/Demographics_correlated_genes"
+
+##Female n=112 Male n=97 Female=0 Male=1 Female is the first group so the positive and negative correlated are for F
+##White n=153 Black n=49 White=1 Black=2 White is the first group so the positive and negative correlated are for W
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Demographics_correlated_genes"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+my.cat.cor(fpkm.matrix.clean,feature.name="GENDER",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+my.cat.cor(fpkm.matrix.clean,feature.name="RACE",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"RACE"]%in%c(0,1),],outputdir=output.dir)
+
+# Stage II-III treatment effect
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Treatment_responsive_genes"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+# stage II-III treatment
+output.subdir<-file.path(output.dir,"Stage II-III")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+#my.cat.cor(fpkm.matrix.clean,feature.name="PHENGRP",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"PHENGRP"]%in%c(3,4),],outputdir=output.subdir)
+my.cat.cor(fpkm.matrix.clean,feature.name="PHENGRP",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"PHENGRP"]%in%c("Stage II-III, untreated","Stage II-III, treated"),],outputdir=output.subdir)
+
+# stage IV treatment
+output.subdir<-file.path(output.dir,"Stage IV")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+#my.cat.cor(fpkm.matrix.clean,feature.name="PHENGRP",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"PHENGRP"]%in%c(5,6),],outputdir=output.subdir)
+my.cat.cor(fpkm.matrix.clean,feature.name="PHENGRP",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"PHENGRP"]%in%c("Stage IV, untreated","Stage IV, treated"),],outputdir=output.subdir)
+
+# pairwise comparison between different phenotypic groups
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Phenotype_DEGs"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+other.pheno<-1:8
+other.pheno<-setdiff(other.pheno,2)
+other.pheno.names<-c(
+"Multi-organ",
+"Non-acute, Stage I, untreated",
+"Stage II-III, treated",
+"Stage II-III, untreated",
+"Stage IV, treated",
+"Stage IV, untreated",
+"Acute Sarcoidosis, untreated",
+"Remitting, untreated")
+other.pheno.names<-other.pheno.names[-2]
+
+for(i in 1:length(other.pheno)){
+output.subdir<-file.path(output.dir,other.pheno.names[i])
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.cat.cor(fpkm.matrix.clean,feature.name="PHENGRP",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"PHENGRP"]%in%c(other.pheno.names[i],"Non-acute, Stage I, untreated"),],outputdir=output.subdir)
+}
+
+
+
+# scadding stage pairwise comparison
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/SCADDING_CAT_DEGs"
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)
+}
+
+other.pheno<-c("I","II","III","IV")
+other.pheno.names<-paste("SCADDING_",other.pheno,sep="")
+
+for(i in 1:length(other.pheno)){
+output.subdir<-file.path(output.dir,other.pheno.names[i])
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.cat.cor(fpkm.matrix.clean,feature.name="SCADDING",tissue.name="PBMC",clinic.matrix=my.clinic.matrix[my.clinic.matrix[,"SCADDING"]%in%c(other.pheno[i],"0"),],outputdir=output.subdir)
+}
+
+#output.dir<-file.path(work.dir,"scratch/Antun/SUPERvisedA/Results_summary2/PFTs_correlated_genes")
+#my.cat.cor(fpkm.matrix.clean,feature.name="FEV1FVCratioBinary",tissue.name="BAL",samplelist=sample.list.all,clinicmatrix=clinic.matrix,outputdir=output.dir)
+#my.cat.cor(fpkm.matrix.clean,feature.name="obstructiveBinary",tissue.name="BAL",samplelist=sample.list.all,clinicmatrix=clinic.matrix,outputdir=output.dir)
+#my.cat.cor(fpkm.matrix.clean,feature.name="restrictiveBinary",tissue.name="BAL",samplelist=sample.list.all,clinicmatrix=clinic.matrix,outputdir=output.dir)
+```
+
+### CT scan reads
+* Identify genes associated with CT scan reads.
+```{r}
+################################
+# 4.12. Identify genes associated with the CT scan variables
+
+# take an average between the two slides for all the cell differentials
+feature.names<-c(
+"Med_Lymphadenopathy",
+"Hilar_Lymphadenopathy",
+"Micronodule",
+"Bronchial_Wall_Thickening",
+"Traction_Bronchiectasis",
+"Bronchiectasis_severity",
+"Ground_Glass",
+"Honeycombing",
+"Reticular_Abnormality",
+"Pulmonary_Art",
+"Tree_in_bud"
+)
+
+ct.matrix<-my.clinic.matrix[,feature.names]
+
+################
+# change the coding of the CT variables
+
+# Med_Lymphadenopathy: 0=no, 1=left, 2=right, 3=bilateral
+# v1: yes vs no
+# v2: bilateral vs one side
+# v3: numeric 0=no, 1=one side, 2=bilateral
+temp.vect<-ct.matrix[,"Med_Lymphadenopathy"]  # yes versus no and billateral versus one side
+temp1<-rep(NA,nrow(ct.matrix))
+temp2<-temp1
+temp3<-temp1
+
+temp1[temp.vect==0]<-0
+temp1[temp.vect>0]<-1
+
+temp2[temp.vect==1 | temp.vect==2]<-0
+temp2[temp.vect==3]<-1
+
+temp3[temp.vect==0]<-0
+temp3[temp.vect==1 | temp.vect==2]<-1
+temp3[temp.vect==3]<-2
+
+ct.matrix<-cbind(ct.matrix,temp1,temp2,temp3)
+colnames(ct.matrix)[(ncol(ct.matrix)-2):ncol(ct.matrix)]<-c("Med_Lymphadenopathy_yes_no","Med_Lymphadenopathy_oneside_bi","Med_Lymphadenopathy_numeric")
+
+
+# Hilar_Lymphadenopathy: 0=no, 1=left, 2=right, 3=bilateral
+# v1: yes vs no
+# v2: bilateral vs one side
+# v3: numeric 0=no, 1=one side, 2=bilateral
+temp.vect<-ct.matrix[,"Hilar_Lymphadenopathy"]  # yes versus no and billateral versus one side
+temp1<-rep(NA,nrow(ct.matrix))
+temp2<-temp1
+temp3<-temp1
+
+temp1[temp.vect==0]<-0
+temp1[temp.vect>0]<-1
+
+temp2[temp.vect==1 | temp.vect==2]<-0
+temp2[temp.vect==3]<-1
+
+temp3[temp.vect==0]<-0
+temp3[temp.vect==1 | temp.vect==2]<-1
+temp3[temp.vect==3]<-2
+
+ct.matrix<-cbind(ct.matrix,temp1,temp2,temp3)
+colnames(ct.matrix)[(ncol(ct.matrix)-2):ncol(ct.matrix)]<-c("Hilar_Lymphadenopathy_yes_no","Hilar_Lymphadenopathy_oneside_bi","Hilar_Lymphadenopathy_numeric")
+
+# for original CT reads
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/CTVariables_correlated_genes"
+
+if(file.exists(output.dir)==F){
+dir.create(output.dir)
+}
+
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Med_Lymphadenopathy",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Hilar_Lymphadenopathy",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Bronchial_Wall_Thickening",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Traction_Bronchiectasis",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Bronchiectasis_severity",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Ground_Glass",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Honeycombing",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Reticular_Abnormality",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Med_Lymphadenopathy_numeric",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+my.con.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Hilar_Lymphadenopathy_numeric",method.name="spearman",tissue.name="PBMC",clinic.matri=ct.matrix,output.dir=output.dir)
+
+# for the binary CT variables
+
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/CTVariables_correlated_genes"
+if(file.exists(output.dir)==F){
+dir.create(output.dir)
+}
+
+cat("Hilar_Lymphadenopathy_yes_no ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Hilar_Lymphadenopathy_yes_no),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Hilar_Lymphadenopathy_yes_no",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+
+cat("Hilar_Lymphadenopathy_oneside_bi ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Hilar_Lymphadenopathy_oneside_bi),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Hilar_Lymphadenopathy_oneside_bi",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+
+cat("Med_Lymphadenopathy_yes_no ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Med_Lymphadenopathy_yes_no),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Med_Lymphadenopathy_yes_no",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+
+cat("Med_Lymphadenopathy_oneside_bi ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Med_Lymphadenopathy_oneside_bi),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Med_Lymphadenopathy_oneside_bi",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+
+cat("Pulmonary_Art ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Pulmonary_Art),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Pulmonary_Art",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+
+cat("Tree_in_bud ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Tree_in_bud),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Tree_in_bud",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+
+cat("Micronodule ([pheno value] [# of obs]):\n")
+write.table(table(ct.matrix$Micronodule),row.names=F,col.names = F,quote=F)
+cat("\n",sep="")
+my.cat.cor(fpkm.matrix.clean=fpkm.matrix.clean,feature.name="Micronodule",tissue.name="PBMC",clinic.matrix=ct.matrix,outputdir=output.dir)
+```
+
+### Recoded Micronodule and Lymphadenopathy
+We recode the micronodule and lymphadenopathy to get a redefined and likely more accurate phenotype definition. 
+
+#### DEGs
+We consider this phenotype as a categorical variable and identify differentially expressed genes between these four groups using the none group as baseline group.
+
+* First, define the function to do the test.
+```{r}
+my.cat.cor<-function(fpkm.matrix.clean,feature.name="GENDER",method.name="wilcox",tissue.name="BAL",clinic.matrix,outputdir){
+
+# extract the fpkm matrix for the given tissue
+temp.names<-intersect(colnames(fpkm.matrix.clean),rownames(clinic.matrix))
+data.matrix<-fpkm.matrix.clean[,temp.names]
+clinic.matrix<-clinic.matrix[temp.names,]
+bal.fpkm<-data.matrix
+
+# generate the clinical matrix
+my.clinic.matrix<-clinic.matrix[colnames(data.matrix),]	
+
+clinic.vect<-as.numeric(as.factor(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name]))
+if(length(table(clinic.vect))!=2){
+cat("ERROR: the phenotype does not have two levels!\n")
+return(1)
+}
+
+cat(feature.name,": baseline=",sort(unique(my.clinic.matrix[,colnames(my.clinic.matrix)==feature.name]),decreasing = F)[1],"\n",sep="")
+
+# generate the correlation results
+x1<-bal.fpkm[,!is.na(clinic.vect) & clinic.vect==as.numeric(names(table(clinic.vect))[1])]
+x2<-bal.fpkm[,!is.na(clinic.vect) & clinic.vect==as.numeric(names(table(clinic.vect))[2])]
+
+#age.pvalue<-apply(bal.fpkm,1,my.cor.test,y=clinic.vect,method.name=method.name)
+age.pvalue.direct<-apply(cbind(x1,x2),1,my.wilcox,n=ncol(x1))
+age.pvalue<-abs(age.pvalue.direct)
+
+#age.pvalue<-matrix(unlist(age.pvalue),ncol=2,byrow=T)
+age.pvalue<-cbind(age.pvalue,rep(NA,length(age.pvalue)))
+colnames(age.pvalue)<-c("pvalue","corr_coef")
+age.fdr<-p.adjust(age.pvalue[,"pvalue"],method="fdr")
+age.pvalue<-cbind(age.pvalue,age.fdr)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fdr"
+rownames(age.pvalue)<-rownames(bal.fpkm)
+temp.fold<-apply(x1,1,mean,na.rm=T)/apply(x2,1,mean,na.rm=T)
+age.pvalue<-cbind(age.pvalue,temp.fold)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"fold_change"
+
+age.pvalue<-cbind(age.pvalue,age.pvalue.direct)
+colnames(age.pvalue)[ncol(age.pvalue)]<-"pval_dir"
+
+
+fpkm.info<-apply(bal.fpkm>0,1,sum)
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>0.1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm>1,1,sum))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,median))
+fpkm.info<-cbind(fpkm.info,apply(bal.fpkm,1,mean))
+colnames(fpkm.info)<-c("fpkm>0_num","fpkm>0.1_num","fpkm>1_num","fpkm_median","fpkm_mean")
+
+
+if(file.exists(outputdir)==F){
+cat("WARNING: output.dir doesn't exists!\n")
+return(1)
+}
+
+cmd.out<-cbind(age.pvalue,fpkm.info)
+output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_allgenes_",tissue.name,".txt",sep=""))
+cat("gene_names\t",file=output.filepath,append=F)
+write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+
+if(sum(!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05)==0){
+  # When there's nothing that pass the FDR threshold, we use the threshold of p value<0.05 & fold change >2
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+
+  cmd.out<-cbind(age.pvalue,fpkm.info)
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,".txt",sep=""))
+  cat("gene_names\t",file=output.filepath,append=F)
+  write.table(cmd.out[sig.genes,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_both_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_positive_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-sig.genes[age.pvalue[sig.genes,"pval_dir"]>0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_pvalue0.05_FC2.0_",tissue.name,"_negative_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"pvalue"]) & age.pvalue[,"pvalue"]<0.05 & (!is.na(age.pvalue[,"fold_change"])) & (age.pvalue[,"fold_change"]>2 | age.pvalue[,"fold_change"]< 1/2) ]
+  sig.genes<-sig.genes[age.pvalue[sig.genes,"pval_dir"]<0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)  
+  
+}else{
+  # if there are anything significant with FDR<0.05
+  cmd.out<-cbind(age.pvalue,fpkm.info)
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,".txt",sep=""))
+  cat("gene_names\t",file=output.filepath,append=F)
+  write.table(cmd.out[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05,],file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_both_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_positive_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05 & age.pvalue[,"pval_dir"]>0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+  
+  
+  output.filepath<-file.path(outputdir,paste("correlation_",method.name,"_",feature.name,"_fdr0.05_",tissue.name,"_negative_metacore.txt",sep=""))
+  cat("gene_names\tintensity\n",file=output.filepath,append=F)
+  sig.genes<-rownames(data.matrix)[!is.na(age.pvalue[,"fdr"]) & age.pvalue[,"fdr"]<0.05 & age.pvalue[,"pval_dir"]<0]
+  sig.genes<-unname(sapply(sig.genes,my.element.extract,splitchar="_",index=1))
+  sig.genes<-unique(sig.genes)
+  cmd.out<-cbind(sig.genes,rep(1,length(sig.genes)))
+  write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=F,col.names=F,quote=F)
+}
+return(0)
+}
+```
+
+* Second, load in the data.
+```{r}
+
+# load in the clinical data
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/data/clin_data_visit1_trunc_XY.csv")
+clinic.matrix=read.csv(clinic.filepath,check.names=F,stringsAsFactors=F)
+rownames(clinic.matrix)<-clinic.matrix[,1]
+
+# load in the CT scan data.
+ct.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/CT_data_20170712/Sarc_ct_reads_corrected.xls")
+ct.matrix<-read.xls(ct.filepath,as.is=TRUE)
+rownames(ct.matrix)<-ct.matrix[,1]
+ct.matrix<-ct.matrix[clinic.matrix$GRADSID,]
+ct.matrix[,1]<-clinic.matrix$GRADSID
+rownames(ct.matrix)<-ct.matrix[,1]
+my.ct.matrix<-ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")]
+clinic.matrix<-cbind(clinic.matrix,ct.matrix[,c("Micronodule","Micronodule_conglomerate","Med_Lymphadenopathy","Hilar_Lymphadenopathy")],stringsAsFactors=F)
+
+# generate the contingency table
+micronodule.vect<-as.logical(my.ct.matrix[,"Micronodule"]) | as.logical(my.ct.matrix[,"Micronodule_conglomerate"])
+temp1<-my.ct.matrix$Med_Lymphadenopathy
+temp2<-my.ct.matrix$Hilar_Lymphadenopathy
+temp1[!is.na(temp1) & temp1!=0]<-1
+temp2[!is.na(temp2) & temp2!=0]<-1
+lympha.vect<-as.logical(temp1) | as.logical(temp2)
+
+cat("Here's a contingency table showing the overlap between presence of micronodule and lymphadenopathy:\n")
+table(micronodule.vect,lympha.vect)
+cat("\nHere's the breakdown of patients with no micronodule and no lymphadenopathy across the different SCADDING stage:\n")
+table(clinic.matrix$SCADDING[(!micronodule.vect) & (!lympha.vect)])
+cat("\n")
+
+# define a new phenotype "nodule_lymph_pheno" based on these four groups
+my.pheno<-rep("",nrow(clinic.matrix))
+my.pheno[(!micronodule.vect) & (!lympha.vect)]<-"none"
+my.pheno[micronodule.vect & (!lympha.vect)]<-"micronodule"
+my.pheno[(!micronodule.vect) & lympha.vect]<-"lymph"
+my.pheno[micronodule.vect & lympha.vect]<-"both"
+my.pheno[my.pheno==""]<-NA
+clinic.matrix<-cbind(clinic.matrix,my.pheno,stringsAsFactors=F)
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"nodule_lymph_pheno"
+
+
+# load in the gene expression data
+# fpkm.filepath<-"/Users/yanxiting/MyVolumes/GRACE/scratch/GRADS/SARC_results/Results_summary_BAL_hg38/FPKM_matrix_hg38_Corrected_allGenes_BAL209_withAnnot.txt"
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","TPM_baseline_276_clean_GRADSID.txt")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+fpkm.matrix.anno<-fpkm.matrix[,1:5]
+fpkm.matrix<-fpkm.matrix[,6:ncol(fpkm.matrix)]
+rownames(fpkm.matrix)<-paste(fpkm.matrix.anno[,"Gene_Id"],"_",fpkm.matrix.anno[,"Chr"],sep="")
+
+```
+
+
+* Apply the function to binary traits.
+```{r}
+#output.dir<-"/home/fas/kaminski/am2952/scratch/SARC209clean/Results_summary/Demographics_correlated_genes"
+
+##Female n=112 Male n=97 Female=0 Male=1 Female is the first group so the positive and negative correlated are for F
+##White n=153 Black n=49 White=1 Black=2 White is the first group so the positive and negative correlated are for W
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/Supervised_Analysis/NoduleLymphaPheno_DEGs"
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+# compare lymphadenopathy only to micronodule only
+output.subdir<-file.path(output.dir,"lymph_micronodule_compare")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+fpkm.matrix.clean<-cbind(fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="lymph"],fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="micronodule"])
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+temp<-my.cat.cor(fpkm.matrix.clean,feature.name="nodule_lymph_pheno",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+output.filepath<-file.path(output.subdir,"readme.txt")
+cat(temp,file=output.filepath,append=F)
+
+# compare lymphadenopathy only to both
+output.subdir<-file.path(output.dir,"both_lymph_compare")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+fpkm.matrix.clean<-cbind(fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="lymph"],fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="both"])
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+temp<-my.cat.cor(fpkm.matrix.clean,feature.name="nodule_lymph_pheno",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+output.filepath<-file.path(output.subdir,"readme.txt")
+cat(temp,file=output.filepath,append=F)
+
+# compare micronodule only to both
+output.subdir<-file.path(output.dir,"both_micronodule_compare")
+if(file.exists(output.subdir)==F){
+  dir.create(output.subdir)
+}
+
+my.clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+fpkm.matrix.clean<-cbind(fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="micronodule"],fpkm.matrix[,(!is.na(as.character(my.clinic.matrix[,"nodule_lymph_pheno"]))) & as.character(my.clinic.matrix[,"nodule_lymph_pheno"])=="both"])
+my.clinic.matrix<-my.clinic.matrix[colnames(fpkm.matrix.clean),]
+temp<-my.cat.cor(fpkm.matrix.clean,feature.name="nodule_lymph_pheno",tissue.name="PBMC",clinic.matrix=my.clinic.matrix,outputdir=output.dir)
+output.filepath<-file.path(output.subdir,"readme.txt")
+cat(temp,file=output.filepath,append=F)
+
+
+```
+
+
+### Overlap between different traits
+* We show the number of genes significantly (FDR<0.05) associated with the different clinical traits.
+```{r eval=TRUE, echo=FALSE, cache=TRUE,warning=FALSE,message=FALSE,results='asis'}
+data.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
+
+#data.dir<-"/home/antun/driver_Grace_xy48/scratch/Antun/SUPERvisedA/Results_summary2"
+final.list<-list()
+# load in the gene lists
+var.names<-c("AGE","GENDER","RACE",
+             "FVCPRED","BDFVC","FEV1PRED","BDFEV1","PREDDLCO","BDDLCO","FEV1FVCratio",
+             "Bronchial_Wall_Thickening","Bronchiectasis_severity","Ground_Glass","Honeycombing","Reticular_Abnormality","Traction_Bronchiectasis","Med_Lymphadenopathy_yes_no","Hilar_Lymphadenopathy_yes_no","SCADDING","p_total","p_mono","p_eos","p_lymph","p_baso","p_neut","abs_lymph")
+var.annot<-c("Age","Gender","Race",
+             "FVC% PRED","FVC","FEV1% PRED","FEV1","DLCO% PRED","DLCO","FEV1/FVC ratio",
+             "Bronchial Wall Thickening","Bronchiectasis Severity","Ground Glass","Honeycombing","Reticular Abnormality","Traction Bronchiestasis","Mediastinal Lymphadenopathy","Hilar Lymphadenopathy","SCADDING","Total Cell Counts","Monocyte %","Eosinophil %","Lymphocyte %","Basophil %","Neutrophil %","Absolute Lymphocyte Count")
+var.cat<-c(rep("Demographics",3),
+           rep("PFTs",7),
+           rep("CTVariables",8),
+           "Disease",
+           rep("CellDifferentials",7))
+for(i in 1:length(var.names)){
+file.names<-list.files(file.path(data.dir,paste(var.cat[i],"_correlated_genes",sep="")))
+data.filepath<-file.path(data.dir,paste(var.cat[i],"_correlated_genes",sep=""),file.names[grep(paste(var.names[i],"_allgenes_PBMC.txt",sep=""),file.names)])
+if(length(data.filepath)>1){
+  # For race and gender, there are two results: spearman and wilcox. We use the results by the Wilcoxon Rank Sum test.
+  cat("There are ",length(data.filepath)," files:\n",sep="")
+  cat(data.filepath,collapse="\n")
+  data.filepath<-data.filepath[grep("wilcox",data.filepath)]
+  cat("\nWe chose ",data.filepath,"\n",sep="")
+}
+#data.filepath<-file.path(data.dir,paste(var.cat[i],"_correlated_genes",sep=""),paste("correlation_spearman_",var.names[i],"_allgenes_BAL.txt",sep=""))
+temp<-read.table(data.filepath,sep = "\t",header=T,check.names=F,row.names=1,comment.char="")
+#  temp<-temp[!is.na(temp[,"fdr"]) & temp[,"fdr"]<0.05,]
+final.list[[i]]<-temp
+}
+names(final.list)<-var.annot
+
+# get all the gene names
+name_genes<-character()
+for(i in 1:length(final.list)){
+temp<-final.list[[i]]
+
+name_genes<-union(name_genes,rownames(temp)[!is.na(temp[,"fdr"]) & temp[,"fdr"]<0.05])
+}
+
+name_genes<-unname(sapply(name_genes,my.element.remove,splitchar="_",index=-1))
+cat("\n There are in total ",length(name_genes)," significant genes by the supervised analysis on all the variables.\n",sep="")
+```
+
+```{r eval=TRUE,fig.width=10,fig.height=10,cache=TRUE,warning=FALSE,message=FALSE,results='asis'}
+#http://www.sthda.com/english/wiki/ggplot2-quick-correlation-matrix-heatmap-r-software-and-data-visualization
+# calculate the number of overlapping genes
+output.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/overlap"
 
 if(file.exists(output.dir)==F){
   dir.create(output.dir)
 }
 
-#count.matrix <- read.delim(data.filepath,row.names="GeneID")
-count.matrix<-read.table(data.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+overlap.n.matrix<-matrix(NA,nrow=length(final.list),ncol=length(final.list))
+overlap.p.matrix<-matrix(NA,nrow=length(final.list),ncol=length(final.list))
+overlap.n.matrix.pos<-overlap.n.matrix
+overlap.n.matrix.neg<-overlap.n.matrix
+overlap.n.matrix.directsummary<-overlap.n.matrix
 
-annot.matrix<-count.matrix[,1:6]
-count.matrix<-count.matrix[,7:ncol(count.matrix)]
+for(i in 1:length(final.list)){
+  for(j in 1:length(final.list)){
+    if(i==j){
+        overlap.n.matrix[i,j]<-sum((!is.na(final.list[[i]][,"fdr"])) & final.list[[i]][,"fdr"]<0.05)  
 
-############################################
-# 2. load in the phenotype data that contain the group and covariate info
-pheno.filepath<-"/home/yanxiting/driver_Grace/scratch/Shervin/pheno_data/phenotype_updated.txt"
-pheno.matrix<-read.table(pheno.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+        overlap.n.matrix.pos[i,j]<-overlap.n.matrix[i,j]
+        overlap.n.matrix.neg[i,j]<-0
+      
+        list.overlap<-rownames(final.list[[i]])[!is.na(final.list[[i]][,"fdr"]) & final.list[[i]][,"fdr"]<0.05]
 
-# add the subject ID column
-temp.vect<-sapply(pheno.matrix[,1],my.element.remove,splitchar="",index=-1)
-pheno.matrix<-cbind(pheno.matrix,temp.vect)
-colnames(pheno.matrix)[ncol(pheno.matrix)]<-"Subject"
+      if("pval_dir"%in%colnames(final.list[[i]])){
+        coef.1<-final.list[[i]][list.overlap,"pval_dir"]
+      }else{
+        coef.1<-final.list[[i]][list.overlap,"corr_coef"]
+      }
 
-# match the gene expression data and phenotype data
-count.matrix<-count.matrix[,pheno.matrix[,1]]
+      overlap.n.matrix.directsummary[i,j]<-paste(sum(coef.1>0)," +\n",sum(coef.1<0)," -",sep="")
+      next
+    }
+    temp1<-final.list[[i]]
+    temp2<-final.list[[j]]
+    
+    temp.names<-intersect(rownames(temp1),rownames(temp2))
+
+    temp1<-temp1[temp.names,]
+    temp2<-temp2[temp.names,]
+    
+    list1<-rownames(final.list[[i]])[!is.na(final.list[[i]][,"fdr"]) & final.list[[i]][,"fdr"]<0.05]
+    list2<-rownames(final.list[[j]])[!is.na(final.list[[j]][,"fdr"]) & final.list[[j]][,"fdr"]<0.05]
+
+    list.overlap<-intersect(list1,list2)
+    
+    if("pval_dir"%in%colnames(final.list[[i]])){
+      coef.1<-final.list[[i]][list.overlap,"pval_dir"]
+    }else{
+      coef.1<-final.list[[i]][list.overlap,"corr_coef"]
+    }
+
+    if("pval_dir"%in%colnames(final.list[[j]])){
+      coef.2<-final.list[[j]][list.overlap,"pval_dir"]
+    }else{
+      coef.2<-final.list[[j]][list.overlap,"corr_coef"]
+    }
+    
+    list.overlap.pos<-list.overlap[coef.1 * coef.2 >0]
+    list.overlap.neg<-setdiff(intersect(list1,list2),list.overlap.pos)
+    
+    if(length(list.overlap.pos)>length(list.overlap.neg)){
+      list.1<-list.overlap[coef.1>0 & coef.2>0]
+      list.2<-list.overlap[coef.1<0 & coef.2<0]
+      overlap.n.matrix.directsummary[i,j]<-paste(length(list.1),"(++)\n",length(list.2),"(--)")
+    }
+    if(length(list.overlap.pos)==length(list.overlap.neg)){
+      list.1<-character()
+      list.2<-character()
+      overlap.n.matrix.directsummary[i,j]<-paste("0(++)\n0(--)")
+    }
+    if(length(list.overlap.pos)<length(list.overlap.neg)){
+      list.1<-list.overlap[coef.1>0 & coef.2<0]
+      list.2<-list.overlap[coef.1<0 & coef.2>0]
+      overlap.n.matrix.directsummary[i,j]<-paste(length(list.1),"(+-)\n",length(list.2),"(-+)")
+    }
+    
+    pop.size<-nrow(temp1)
+    success.n<-length(list1)
+    sample.n<-length(list2)
+    x<-length(intersect(list1,list2))
+    
+    overlap.n.matrix[i,j]<-length(intersect(list1,list2))
+    overlap.p.matrix[i,j]<-1-phyper(x-1,success.n,pop.size-success.n,sample.n,lower.tail=TRUE)
+    
+    overlap.n.matrix.pos[i,j]<-length(list.overlap.pos)
+    overlap.n.matrix.neg[i,j]<-length(list.overlap.neg)
+    if(i>j){
+    # output the list of overlap genes
+    if(length(list.overlap)>0){
+      output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_all.txt",sep=""))
+      cmd.out<-final.list[[i]][list.overlap,]
+      colnames(cmd.out)<-paste(colnames(cmd.out)," (",names(final.list)[i],")",sep="")
+      cmd.out.1<-final.list[[j]][list.overlap,]
+      colnames(cmd.out.1)<-paste(colnames(cmd.out.1)," (",names(final.list)[j],")",sep="")
+      cmd.out<-cbind(cmd.out,cmd.out.1)
+      cat("tracking_ID\t",file=output.filepath,append=F)
+      write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+    }
+    # output the list of overlap genes with the same directions
+    if(length(list.overlap.pos)>0){
+      output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_samedirection.txt",sep=""))
+      cmd.out<-final.list[[i]][list.overlap.pos,]
+      colnames(cmd.out)<-paste(colnames(cmd.out)," (",names(final.list)[i],")",sep="")
+      cmd.out.1<-final.list[[j]][list.overlap.pos,]
+      colnames(cmd.out.1)<-paste(colnames(cmd.out.1)," (",names(final.list)[j],")",sep="")
+      cmd.out<-cbind(cmd.out,cmd.out.1)
+      cat("tracking_ID\t",file=output.filepath,append=F)
+      write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+    }
+    # output the list of overlapped genes with opposite directions
+     if(length(list.overlap.neg)>0){
+      output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_oppositedirection.txt",sep=""))
+      cmd.out<-final.list[[i]][list.overlap.neg,]
+      colnames(cmd.out)<-paste(colnames(cmd.out)," (",names(final.list)[i],")",sep="")
+      cmd.out.1<-final.list[[j]][list.overlap.neg,]
+      colnames(cmd.out.1)<-paste(colnames(cmd.out.1)," (",names(final.list)[j],")",sep="")
+      cmd.out<-cbind(cmd.out,cmd.out.1)
+      cat("tracking_ID\t",file=output.filepath,append=F)
+      write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+     }
+      
+     if(length(list.1)>0){
+       
+       if(length(list.overlap.pos)>length(list.overlap.neg)){
+          output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_pospos.txt",sep=""))
+       }
+       
+       if(length(list.overlap.pos)<length(list.overlap.neg)){
+          output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_posneg.txt",sep=""))
+       }
+        cmd.out<-final.list[[i]][list.1,]
+        colnames(cmd.out)<-paste(colnames(cmd.out)," (",names(final.list)[i],")",sep="")
+        cmd.out.1<-final.list[[j]][list.1,]
+        colnames(cmd.out.1)<-paste(colnames(cmd.out.1)," (",names(final.list)[j],")",sep="")
+        cmd.out<-cbind(cmd.out,cmd.out.1)
+        cat("tracking_ID\t",file=output.filepath,append=F)
+        write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+     }
+      
+    if(length(list.2)>0){
+       if(length(list.overlap.pos)>length(list.overlap.neg)){
+          output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_negneg.txt",sep=""))
+       }
+       
+       if(length(list.overlap.pos)<length(list.overlap.neg)){
+          output.filepath<-file.path(output.dir,paste(names(final.list)[i],"_VS_",names(final.list)[j],"_negpos.txt",sep=""))
+       }
+          cmd.out<-final.list[[i]][list.2,]
+          colnames(cmd.out)<-paste(colnames(cmd.out)," (",names(final.list)[i],")",sep="")
+          cmd.out.1<-final.list[[j]][list.2,]
+          colnames(cmd.out.1)<-paste(colnames(cmd.out.1)," (",names(final.list)[j],")",sep="")
+          cmd.out<-cbind(cmd.out,cmd.out.1)
+          cat("tracking_ID\t",file=output.filepath,append=F)
+          write.table(cmd.out,file=output.filepath,append=T,sep="\t",row.names=T,col.names=T,quote=F)
+    }
+    }
+  }
+}
+
+
+rownames(overlap.n.matrix)<-names(final.list)
+colnames(overlap.n.matrix)<-names(final.list)
+
+rownames(overlap.p.matrix)<-names(final.list)
+colnames(overlap.p.matrix)<-names(final.list)
 
 ```
 
-# EdgeR DEG analysis (protocols)
-We identify the differentially expressed genes between polyA and RiboD protocols using all samples.
-```{r}
-group<-factor(pheno.matrix[,"Protocol"],levels=c("PolyA","RiboD"))
-y <- DGEList(counts=as.data.frame(count.matrix),group=group,genes=annot.matrix,samples=pheno.matrix)
-keep <- filterByExpr(y,group=group)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
 
-#subject<-factor(pheno.matrix[,"Subject"])
-design.matrix <- model.matrix(~group)
+```{r eval=TRUE,fig.width=12,fig.height=12, echo=FALSE,cache=FALSE,results='asis'}
+# Get lower triangle of the correlation matrix
+get_lower_tri<-function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+# Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
 
-y <- estimateDisp(y,design.matrix)
-# to perform quasi-likelihood F-tests:
-fit <- glmQLFit(y,design=design.matrix)
-qlf <- glmQLFTest(fit)
-#topTags(qlf)
+library(reshape2)
+library(ggplot2)
 
-# save the results into rds file
-cmd.out<-cbind(qlf$genes,qlf$table)
-fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
-cmd.out<-cbind(cmd.out,fdr.vect)
-colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
-output.filepath<-file.path(output.dir,"DEGs_all_polyA_vs_riboD.rds")
-saveRDS(cmd.out,file=output.filepath,refhook = NULL)
+# draw the overlap matrix using ggplot2
+#c1<-signif(overlap.n.matrix, 2)
+c1<-overlap.n.matrix
+c2<-overlap.p.matrix
+#c2<-signif(overlap.p.matrix, 2)
+diag(c2)<-rep(0,length(diag(c2)))
+upper_tri <- get_upper_tri(c1)
+upper_tri_p<-get_upper_tri(c2)
+melted_cormat_n <- melt(upper_tri, na.rm = TRUE)
+melted_cormat_p<-melt(upper_tri_p, na.rm=TRUE)
 
-protocol.qlf<-qlf
-protocol.degs<-cmd.out
-cat("Here're the numbers of significant genes (FDR<0.05):\n")
-summary(decideTests(qlf))
-plotMD(qlf)
+melted_cormat<-melted_cormat_n
+melted_cormat[,3]<-melted_cormat_p[,3]
+melted_cormat<-cbind(melted_cormat,melted_cormat_n[,3])
+colnames(melted_cormat)[4]<-"gnum"
+melted_cormat[melted_cormat[,"value"]>=0.05,"value"]<-NA
 
+g<-ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient(low = "yellow", high = "white", na.value="lightgray", space = "Lab", name="# of overlapping genes") +
+  #scale_fill_gradientn(colours = c("red", "white"),values=scales::rescale(c(0, 0.05, 1)), na.value="white", space = "Lab", name="# of overlapping genes") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1))+
+  coord_fixed()
+#melted_cormat[,3]<-melted_cormat_n[,3]
+g<-g+
+  geom_text(aes(Var2, Var1, label = gnum), color = "black", size = 4)
+print(g)
+
+output.subdir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
+ggsave(filename = "Figure2a_SupervisedAnalysis_OverlapMatrix_withFEV1FVCratio.eps",path=output.subdir,width=12,height=12,device="eps")
 ```
 
-## Observations
 
-* There is a big difference bewteen the two protocols which was also observed on the PCA plot of all samples labelled using protocol.
-
-# EdgeR DEG analysis (all_tumor vs normal)
-We identify the differentially expressed genes between normal and tumor tissues in the same subject using the paired test by edgeR.
-
-```{r}
-############################################
-# 3. load in the phenotype data that contain the group and covariate info
-#    identify the DEGs between tumor and normal by considering the data as paired data.
-#group <- factor(c(1,1,2,2))
-group<-factor(pheno.matrix[,"disease"],levels=c("normal","tumor"))
-y <- DGEList(counts=as.data.frame(count.matrix),group=group,genes=annot.matrix,samples=pheno.matrix)
-keep <- filterByExpr(y,group=group)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
-
-subject<-factor(pheno.matrix[,"Subject"])
-design.matrix <- model.matrix(~ subject + group)
-
-y <- estimateDisp(y,design.matrix)
-# to perform quasi-likelihood F-tests:
-fit <- glmQLFit(y,design=design.matrix)
-qlf <- glmQLFTest(fit)
-#topTags(qlf)
-
-############################################
-# 4. output the results and the significant genes
-cmd.out<-cbind(qlf$genes,qlf$table)
-fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
-cmd.out<-cbind(cmd.out,fdr.vect)
-colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
-output.filepath<-file.path(output.dir,"DEGs_all_tumor_vs_normal_paired.rds")
-saveRDS(cmd.out,file=output.filepath,refhook = NULL)
-
-disease.qlf.all<-qlf
-disease.degs.all<-cmd.out
-cat("Here're the numbers of significant genes (FDR<0.05):\n")
-summary(decideTests(qlf))
-plotMD(qlf)
-```
-
-The p values and FDRs of all genes were saved in "DEGs_all_tumor_vs_normal_paired.rds".
-
-## Overlap with protocol DEGs
-We compared the DEGs between tumor and normal and the DEGs between the two protocols.
-
-```{r}
-library(eulerr)
-set.seed(1)
-
-set1 <- paste0(protocol.degs[,"GeneID"],"_",protocol.degs[,"Chr"])[protocol.degs$FDR<0.05]
-set2 <- paste0(disease.degs.all[,"GeneID"],"_",disease.degs.all[,"Chr"])[disease.degs.all$FDR<0.05]
-
-x<-list(set1,set2)
-names(x)<-c("Protocol","Disease_all")
-plot(euler(x,shape="ellipse"), quantities = TRUE)
-```
-
-# EdgeR DEG analysis (PolyA_tumor vs normal)
-We identify the differentially expressed genes between normal and tumor tissues in the same subject using the paired test by edgeR on the polyA protocol samples only.
-
-```{r}
-# extract only polyA samples
-my.count.matrix<-count.matrix[,pheno.matrix[,"Protocol"]=="PolyA"]
-my.pheno.matrix<-pheno.matrix[pheno.matrix[,"Protocol"]=="PolyA",]
-
-############################################
-# 3. load in the phenotype data that contain the group and covariate info
-#    identify the DEGs between tumor and normal by considering the data as paired data.
-#group <- factor(c(1,1,2,2))
-group<-factor(my.pheno.matrix[,"disease"],levels=c("normal","tumor"))
-y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
-keep <- filterByExpr(y,group=group)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
-
-subject<-factor(my.pheno.matrix[,"Subject"])
-design.matrix <- model.matrix(~ subject + group)
-
-y <- estimateDisp(y,design.matrix)
-# to perform quasi-likelihood F-tests:
-fit <- glmQLFit(y,design=design.matrix)
-qlf <- glmQLFTest(fit)
-#topTags(qlf)
-
-############################################
-# 4. output the results and the significant genes
-cmd.out<-cbind(qlf$genes,qlf$table)
-fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
-cmd.out<-cbind(cmd.out,fdr.vect)
-colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
-
-output.filepath<-file.path(output.dir,"DEGs_polyA_tumor_vs_normal_paired.rds")
-#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
-saveRDS(cmd.out,file=output.filepath,refhook = NULL)
-
-summary(decideTests(qlf))
-plotMD(qlf)
-disease.degs.polya<-cmd.out
-disease.qlf.polya<-qlf
-```
-
-The p values and FDRs of all genes were saved in "DEGs_polyA_tumor_vs_normal_paired.txt".
+Here we generate another figure that shows the breakdown of the genes based on the directionality of the correlation coefficients. Each entry will show the number of overlapping genes and the breakdown of these genes into genes with + and + or - and - correlation with the rows and columns if those two features are positively correlated. The breakdown will be the number of genes with + and - or - and + correlation with the row and column if those two features are negatively correlated.  
+```{r fig.width=20,fig.height=20,eval=TRUE}
+get_lower_tri<-function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+# Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
 
 
-# EdgeR DEG analysis (RiboD_tumor vs normal)
-We identify the differentially expressed genes between normal and tumor tissues in the same subject using the paired test by edgeR on the Ribo0 protocol samples only.
+# draw the overlap matrix using ggplot2
+#c1<-signif(overlap.n.matrix, 2)
+temp<-overlap.n.matrix.directsummary
+temp[!is.na(overlap.p.matrix) & overlap.p.matrix>=0.05]<-""
+temp[!is.na(overlap.p.matrix) & overlap.p.matrix<0.05]<-paste("\n",temp[!is.na(overlap.p.matrix) & overlap.p.matrix<0.05],sep="")
+temp[is.na(overlap.p.matrix)]<-paste("\n",temp[is.na(overlap.p.matrix)],sep="")
 
-```{r}
-# These codes were run on the workstation
-# extract only polyA samples
-my.count.matrix<-count.matrix[,pheno.matrix[,"Protocol"]=="RiboD"]
-my.pheno.matrix<-pheno.matrix[pheno.matrix[,"Protocol"]=="RiboD",]
+#c1<-matrix(paste(overlap.n.matrix,"\n",overlap.n.matrix.directsummary,sep=""),nrow=nrow(overlap.n.matrix),byrow=F)
+c1<-matrix(paste(overlap.n.matrix,temp,sep=""),nrow=nrow(overlap.n.matrix),byrow=F)
+rownames(c1)<-rownames(overlap.n.matrix)
+colnames(c1)<-rownames(overlap.n.matrix)
+c2<-overlap.p.matrix
+#c2<-signif(overlap.p.matrix, 2)
+diag(c2)<-rep(0,length(diag(c2)))
+upper_tri <- get_upper_tri(c1)
+upper_tri_p<-get_upper_tri(c2)
+melted_cormat_n <- melt(upper_tri, na.rm = TRUE)
+melted_cormat_p<-melt(upper_tri_p, na.rm=TRUE)
 
-############################################
-# 3. load in the phenotype data that contain the group and covariate info
-#    identify the DEGs between tumor and normal by considering the data as paired data.
-#group <- factor(c(1,1,2,2))
-group<-factor(my.pheno.matrix[,"disease"],levels=c("normal","tumor"))
-y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
-keep <- filterByExpr(y,group=group)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
+melted_cormat<-melted_cormat_n
+melted_cormat[,3]<-melted_cormat_p[,3]
+melted_cormat<-cbind(melted_cormat,melted_cormat_n[,3])
+colnames(melted_cormat)[4]<-"gnum"
+melted_cormat[melted_cormat[,"value"]>=0.05,"value"]<-NA
 
-subject<-factor(my.pheno.matrix[,"Subject"])
-design.matrix <- model.matrix(~ subject + group)
+g<-ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient(low = "yellow", high = "white", na.value="lightgray", space = "Lab", name="# of overlapping genes") +
+  #scale_fill_gradientn(colours = c("red", "white"),values=scales::rescale(c(0, 0.05, 1)), na.value="white", space = "Lab", name="# of overlapping genes") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 18, hjust = 1),axis.text.y = element_text( size = 18))+
+  coord_fixed()
+#melted_cormat[,3]<-melted_cormat_n[,3]
+g<-g+
+  geom_text(aes(Var2, Var1, label = gnum), color = "black", size = 4.5,lineheight = .8)
+print(g)
 
-y <- estimateDisp(y,design.matrix)
-# to perform quasi-likelihood F-tests:
-fit <- glmQLFit(y,design=design.matrix)
-qlf <- glmQLFTest(fit)
-#topTags(qlf)
-
-############################################
-# 4. output the results and the significant genes
-cmd.out<-cbind(qlf$genes,qlf$table)
-fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
-cmd.out<-cbind(cmd.out,fdr.vect)
-colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
-
-output.filepath<-file.path(output.dir,"DEGs_RiboD_tumor_vs_normal_paired.rds")
-#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
-saveRDS(cmd.out,file=output.filepath,refhook = NULL)
-
-summary(decideTests(qlf))
-plotMD(qlf)
-
-disease.degs.ribod<-cmd.out
-disease.qlf.ribod<-qlf
-```
-
-The p values and FDRs of all genes were saved in "DEGs_RiboD_tumor_vs_normal_paired.txt".
-
-## Overlap with other DEGs
-We compared the DEGs between tumor and normal based on all samples and polyA only samples and the DEGs between the two protocols.
-
-```{r}
-library(eulerr)
-set.seed(1)
-
-set1 <- paste0(protocol.degs[,"GeneID"],"_",protocol.degs[,"Chr"])[protocol.degs$FDR<0.05]
-set2 <- paste0(disease.degs.all[,"GeneID"],"_",disease.degs.all[,"Chr"])[disease.degs.all$FDR<0.05]
-set3 <- paste0(disease.degs.ribod[,"GeneID"],"_",disease.degs.ribod[,"Chr"])[disease.degs.ribod$FDR<0.05]
-
-x<-list(set1,set2,set3)
-names(x)<-c("Protocol","Disease_all","Disease_RiboD")
-#plot(euler(x,shape="ellipse"), quantities = TRUE)
-plot(venn(x))
+#output.subdir<-file.path(output.dir,"scratch/GRADS/SARC_results/Results_summary_BAL_hg38/writings")
+output.subdir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
+ggsave(filename = "Figure2a_SupervisedAnalysis_OverlapMatrix_breakdown.eps",path=output.subdir,width=22,height=22,device="eps")
 ```
 
 
 
-## Observations (disease DEGs)
-
-* The DEG analysis using all samples together is strongly affected by the differnece bewteen the two protocols although the comparison was done in a paired sample style and both tumor and normal samples were from the same protocols so that the protocol effect is already controlled.
-
-* No DEGs were identified in PolyA protocol between tumor and normal while within the RiboD, some DEGs were identified with a larger overlap with DEGs from disease_all. This indiciates that the DEGs from Disease_RiboD is more reliable.
-
-* Potentially, we can also run Combat-RNAseq to remove the batch effect and then identify DEGs from the batch corrected data.
 
 
-# EdgeR DEG analysis (RiboD_current vs former smokers)
-We identify the differentially expressed genes between current and former smokers in tumor and normal separately using the RiboD samples. There are not enough samples for this comparison within the polyA samples.
-
-## Normal only
-First, we identify DEGs within normal samples only. There are only two samples within each group.
-```{r}
-# These codes were run on the workstation
-# extract the normal samples only
-my.count.matrix<-count.matrix[,pheno.matrix$disease=="normal" & pheno.matrix$Protocol=="RiboD"]
-my.pheno.matrix<-pheno.matrix[pheno.matrix$disease=="normal" & pheno.matrix$Protocol=="RiboD",]
-
-# never vs current comparison
-############################################
-# 3. load in the phenotype data that contain the group and covariate info
-#    identify the DEGs between tumor and normal by considering the data as paired data.
-#group <- factor(c(1,1,2,2))
-group<-factor(my.pheno.matrix[,"Smoker"],levels=c("former","current"))
-y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
-keep <- filterByExpr(y,group=group)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
-
-#subject<-factor(pheno.matrix[,"Subject"])
-design.matrix <- model.matrix(~ group)
-
-y <- estimateDisp(y,design.matrix)
-# to perform quasi-likelihood F-tests:
-fit <- glmQLFit(y,design=design.matrix)
-qlf <- glmQLFTest(fit)
-#topTags(qlf)
-
-############################################
-# 4. output the results and the significant genes
-cmd.out<-cbind(qlf$genes,qlf$table)
-fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
-cmd.out<-cbind(cmd.out,fdr.vect)
-colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
-
-output.filepath<-file.path(output.dir,"DEGs_RiboD_current_vs_former_normal.rds")
-saveRDS(cmd.out,file=output.filepath,refhook = NULL)
-#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
-
-summary(decideTests(qlf))
-plotMD(qlf)
-
-smoker.degs.ribod.normal<-cmd.out
-smoker.qlf.ribod.normal<-qlf
-
-cat("There are ", sum(smoker.degs.ribod.normal$PValue<0.05 & abs(smoker.degs.ribod.normal$logFC)>log(2,base=exp(1)))," DEGs with p value<0.05 and fold change>2.\n")
-```
 
 
-## Tumor only
-First, we identify DEGs within tumor samples only. There are only two samples within each group.
-```{r}
-# These codes were run on the workstation
-# extract the normal samples only
-my.count.matrix<-count.matrix[,pheno.matrix$disease=="tumor" & pheno.matrix$Protocol=="RiboD"]
-my.pheno.matrix<-pheno.matrix[pheno.matrix$disease=="tumor" & pheno.matrix$Protocol=="RiboD",]
-
-# never vs current comparison
-############################################
-# 3. load in the phenotype data that contain the group and covariate info
-#    identify the DEGs between tumor and normal by considering the data as paired data.
-#group <- factor(c(1,1,2,2))
-group<-factor(my.pheno.matrix[,"Smoker"],levels=c("former","current"))
-y <- DGEList(counts=as.data.frame(my.count.matrix),group=group,genes=annot.matrix,samples=my.pheno.matrix)
-keep <- filterByExpr(y,group=group)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
-
-#subject<-factor(pheno.matrix[,"Subject"])
-design.matrix <- model.matrix(~ group)
-
-y <- estimateDisp(y,design.matrix)
-# to perform quasi-likelihood F-tests:
-fit <- glmQLFit(y,design=design.matrix)
-qlf <- glmQLFTest(fit)
-#topTags(qlf)
-
-############################################
-# 4. output the results and the significant genes
-cmd.out<-cbind(qlf$genes,qlf$table)
-fdr.vect<-p.adjust(cmd.out$PValue,method="fdr")
-cmd.out<-cbind(cmd.out,fdr.vect)
-colnames(cmd.out)[ncol(cmd.out)]<-"FDR"
-
-output.filepath<-file.path(output.dir,"DEGs_RiboD_current_vs_former_tumor.rds")
-saveRDS(cmd.out,file=output.filepath,refhook = NULL)
-#write.table(cmd.out,file=output.filepath,sep="\t",row.names=F,col.names=T,quote=F)
-
-summary(decideTests(qlf))
-plotMD(qlf)
-
-smoker.degs.ribod.tumor<-cmd.out
-smoker.qlf.ribod.tumor<-qlf
-
-cat("There are ", sum(smoker.degs.ribod.tumor$PValue<0.05 & abs(smoker.degs.ribod.tumor$logFC)>log(2,base=exp(1)))," DEGs with p value<0.05 and fold change>2.\n")
-```
-
-
-## Overlap between normal and tumor only
-We compared the DEGs between current and former smokers based on normal and tumor samples within the RiboD protocol.
-
-```{r}
-library(eulerr)
-set.seed(1)
-
-set1 <- paste0(smoker.degs.ribod.normal[,"GeneID"],"_",smoker.degs.ribod.normal[,"Chr"])[smoker.degs.ribod.normal$PValue<0.05 & smoker.degs.ribod.normal$logFC>log(2,base=exp(1))]
-set2 <- paste0(smoker.degs.ribod.tumor[,"GeneID"],"_",smoker.degs.ribod.tumor[,"Chr"])[smoker.degs.ribod.tumor$PValue<0.05 & smoker.degs.ribod.tumor$logFC>log(2,base=exp(1))]
-
-x<-list(set1,set2)
-names(x)<-c("smoker_normal_up","smoker_tumor_up")
-#plot(euler(x,shape="ellipse"), quantities = TRUE)
-plot(venn(x))
-```
-
-```{r}
-library(eulerr)
-set.seed(1)
-
-set1 <- paste0(smoker.degs.ribod.normal[,"GeneID"],"_",smoker.degs.ribod.normal[,"Chr"])[smoker.degs.ribod.normal$PValue<0.05 & smoker.degs.ribod.normal$logFC< -log(2,base=exp(1))]
-set2 <- paste0(smoker.degs.ribod.tumor[,"GeneID"],"_",smoker.degs.ribod.tumor[,"Chr"])[smoker.degs.ribod.tumor$PValue<0.05 & smoker.degs.ribod.tumor$logFC< -log(2,base=exp(1))]
-
-x<-list(set1,set2)
-names(x)<-c("smoker_normal_down","smoker_tumor_down")
-#plot(euler(x,shape="ellipse"), quantities = TRUE)
-plot(venn(x))
-```
