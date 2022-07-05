@@ -55,6 +55,10 @@ We identify the differentially expressed genes between give groups of subjects u
 
 First, we use all samples except X235 based on the PCA analysis.
 
+### Identify DEGs
+
+We first identify DEGs using DESeq2.
+
 ```{r}
 library(DESeq2)
 library(apeglm)
@@ -89,7 +93,7 @@ count.matrix<-count.matrix[,temp.names]
 ```
 
 
-Stage I, untreated vs Stage II-IV, untreated:
+* Stage I, untreated vs Stage II-IV, untreated:
 ```{r}
 # comparing:
 # Stage II-III untreated vs stage IV untreated
@@ -130,6 +134,27 @@ write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 # describe how many genes pass the FDR threshold
 cat("There are ",sum(res$padj<0.05)," genes with FDR<0.05.\n",sep="")
 ```
+
+### Overlap with BLOOM
+
+We over the identified DEGs with BLOOM gene list.
+
+```{r}
+bloom.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes/genesetinflammatory.gmx.txt")
+bloom.genelist<-read.table(bloom.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+
+grads.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2/DEGs_fdr0.05_PHENGRP_Stage.II.IV.untreated_vs_Non.acute.Stage.I.untreated.csv")
+grads.degs<-read.csv(grads.filepath)
+
+ucsf.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/DEGs/DESeq2/DEGs_all_CXR_stage_2_vs_1.csv")
+ucsf.degs<-read.csv(ucsf.filepath)
+ucsf.degs<-ucsf.degs[ucsf.degs$pvalue<0.05 & (ucsf.degs$log2FoldChange>1 | ucsf.degs$log2FoldChange< -1),]
+
+overlap.genes<-intersect(as.character(grads.degs$GeneID),bloom.genelist$BLOOM)
+
+```
+
+
 
 ## no outliers
 
