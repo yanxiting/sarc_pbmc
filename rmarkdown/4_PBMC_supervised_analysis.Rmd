@@ -1217,13 +1217,386 @@ ggsave(filename = "Figure2a_SupervisedAnalysis_OverlapMatrix_breakdown.eps",path
 
 
 
+
 ## DESeq2
-We identify the differentially expressed genes between give groups of subjects using DESeq2.
+
+### PCA
+
+#### Unadjusted DESeq2 Normalized Data
+
+First, we generate PCA plot using the unadjusted DESeq2 normalized data.
+```{r}
+library(xlsx)
+home.dir<-"/home/yanxiting/driver_Grace"
+my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
+
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","DESeq2_normalized_276_clean.txt")
+masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data_PBMC/clin_data_visit1_XY.csv")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char="")
+anno.matrix<-as.matrix(fpkm.matrix)[,1:6]
+rownames(anno.matrix)<-anno.matrix[,"GeneID"]
+rownames(fpkm.matrix)<-anno.matrix[,"GeneID"]
+data.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+
+# load in the clinical data
+clinic.matrix<-read.csv(clinic.filepath,check.names=F,header=T,as.is=TRUE)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[colnames(data.matrix),]
+
+temp.data<-read.xlsx(masterkey.filepath,sheetIndex = 3, check.names=F, startRow=3)
+rownames(temp.data)<-temp.data$`GRADS ID`
+clinic.matrix<-cbind(clinic.matrix,as.matrix(temp.data)[rownames(clinic.matrix),"Phenotype/Genotype"])
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"pheno_group"
+gc(reset=TRUE)
+
+data.matrix.orig<-data.matrix
+clinic.matrix.orig<-clinic.matrix
+```
+
+We generate the 3-dimensional PCA plots.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+
+#######################
+# focus on some of the phenotypic groups
+data.matrix<-data.matrix.orig[,!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated")]
+clinic.matrix<-clinic.matrix.orig[!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated"),]
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+##################
+# PCA analysis
+library(gplots)
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+my.colors<-factor(as.matrix(clinic.matrix)[,"pheno_group"],levels=c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage II-III, treated","Stage IV, untreated","Stage IV, treated"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=1,box = F,axes = T)
+par3d(windowRect = c(0, 0, 400, 400))
+legend3d("topright", legend = c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage II-III, treated","Stage IV, untreated","Stage IV, treated"), pch = 16, col = my.distinct.colors[1:length(unique(my.colors))], cex=0.65, inset=c(0))
+rglwidget()
+#filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+# label the samples based on subjects and disease
+
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+# label samples using subject ID
+
+```
+
+No treated samples.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+
+#######################
+# focus on some of the phenotypic groups
+data.matrix<-data.matrix.orig[,!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage IV, treated","Stage II-III, treated")]
+clinic.matrix<-clinic.matrix.orig[!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage IV, treated","Stage II-III, treated"),]
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+##################
+# PCA analysis
+library(gplots)
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+my.colors<-factor(as.matrix(clinic.matrix)[,"pheno_group"],levels=c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage IV, untreated"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=1,box = F,axes = T)
+par3d(windowRect = c(0, 0, 400, 400))
+legend3d("topright", legend = c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage IV, untreated"), pch = 16, col = my.distinct.colors[1:length(unique(my.colors))], cex=0.65, inset=c(0))
+rglwidget()
+#filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+# label the samples based on subjects and disease
+
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+# label samples using subject ID
+
+```
+
+Stage 1 untreated vs others.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+
+#######################
+# focus on some of the phenotypic groups
+data.matrix<-data.matrix.orig[,!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage IV, treated","Stage II-III, treated")]
+clinic.matrix<-clinic.matrix.orig[!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage IV, treated","Stage II-III, treated"),]
+
+temp.vect<-as.matrix(clinic.matrix)[,"pheno_group"]
+temp.vect[temp.vect!="Non-acute, Stage I, untreated"]<-"Other"
+clinic.matrix$pheno_group<-temp.vect
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+##################
+# PCA analysis
+library(gplots)
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+my.colors<-factor(as.matrix(clinic.matrix)[,"pheno_group"],levels=c("Other","Non-acute, Stage I, untreated"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=1,box = F,axes = T)
+par3d(windowRect = c(0, 0, 400, 400))
+legend3d("topright", legend = c("Other","Non-acute, Stage I, untreated"), pch = 16, col = my.distinct.colors[1:length(unique(my.colors))], cex=0.65, inset=c(0))
+rglwidget()
+#filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+# label the samples based on subjects and disease
+
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+# label samples using subject ID
+
+```
+
+#### Aadjusted DESeq2 Normalized Data
+
+We also generate PCA plot using the DESeq2 normalized data adjusted for cell differentials.
+```{r}
+home.dir<-"/home/yanxiting/driver_Grace"
+my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
+data.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38")
+fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2/DESeq2_normalized_276_clean_celldiffadjusted_withannot.txt")
+#fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","DESeq2_normalized_276_clean.txt")
+masterkey.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data_PBMC/clin_data_visit1_XY.csv")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2")
+
+# load in the fpkm matrix
+fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char="")
+anno.matrix<-as.matrix(fpkm.matrix)[,1:6]
+rownames(anno.matrix)<-anno.matrix[,"GeneID"]
+rownames(fpkm.matrix)<-anno.matrix[,"GeneID"]
+data.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+
+# load in the clinical data
+clinic.matrix<-read.csv(clinic.filepath,check.names=F,header=T,as.is=TRUE)
+rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+clinic.matrix<-clinic.matrix[colnames(data.matrix),]
+
+temp.data<-read.xlsx(masterkey.filepath,sheetIndex = 3, check.names=F, startRow=3)
+rownames(temp.data)<-temp.data$`GRADS ID`
+clinic.matrix<-cbind(clinic.matrix,as.matrix(temp.data)[rownames(clinic.matrix),"Phenotype/Genotype"])
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"pheno_group"
+gc(reset=TRUE)
+
+data.matrix.orig<-data.matrix
+clinic.matrix.orig<-clinic.matrix
+```
+
+We generate the 3-dimensional PCA plots.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+
+#######################
+# focus on some of the phenotypic groups
+data.matrix<-data.matrix.orig[,!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated")]
+clinic.matrix<-clinic.matrix.orig[!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated"),]
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+##################
+# PCA analysis
+library(gplots)
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+my.colors<-factor(as.matrix(clinic.matrix)[,"pheno_group"],levels=c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage II-III, treated","Stage IV, untreated","Stage IV, treated"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=1,box = F,axes = T)
+par3d(windowRect = c(0, 0, 400, 400))
+legend3d("topright", legend = c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage II-III, treated","Stage IV, untreated","Stage IV, treated"), pch = 16, col = my.distinct.colors[1:length(unique(my.colors))], cex=0.65, inset=c(0))
+rglwidget()
+#filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+# label the samples based on subjects and disease
+
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+# label samples using subject ID
+
+```
+
+PCA plot with the untreated subjects only.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+
+#######################
+# focus on some of the phenotypic groups
+data.matrix<-data.matrix.orig[,!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage II-III, treated","Stage IV, treated")]
+clinic.matrix<-clinic.matrix.orig[!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage II-III, treated","Stage IV, treated"),]
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+##################
+# PCA analysis
+library(gplots)
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+my.colors<-factor(as.matrix(clinic.matrix)[,"pheno_group"],levels=c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage IV, untreated"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=1,box = F,axes = T)
+par3d(windowRect = c(0, 0, 400, 400))
+legend3d("topright", legend = c("Remitting, untreated","Non-acute, Stage I, untreated","Stage II-III, untreated","Stage IV, untreated"), pch = 16, col = my.distinct.colors[1:length(unique(my.colors))], cex=0.65, inset=c(0))
+rglwidget()
+#filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+# label the samples based on subjects and disease
+
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+# label samples using subject ID
+
+```
+
+PCA plot only with non-acute Stage I untreated vs all others.
+
+```{r}
+# We ran these codes on the workstation since it's easier to save and demonstrate the generated plots in Rstudio markdown files. 
+###############################################################################################
+# 1. identify outliers using pca plots from all 460 reactions
+library(gdata)
+library(rgl)
+log2.transform=FALSE # do you want to log2 transform the data before PCA or not.
+source(file.path(home.dir,"Rprogram","my_functions.R"))
+
+#######################
+# focus on some of the phenotypic groups
+data.matrix<-data.matrix.orig[,!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage II-III, treated","Stage IV, treated")]
+clinic.matrix<-clinic.matrix.orig[!clinic.matrix.orig$pheno_group%in%c("Multi-organ","Cardiac defining therapy","Acute Sarcoidosis, untreated","Stage II-III, treated","Stage IV, treated"),]
+
+temp.vect<-as.matrix(clinic.matrix)[,"pheno_group"]
+temp.vect[temp.vect!="Non-acute, Stage I, untreated"]<-"Other"
+clinic.matrix$pheno_group<-temp.vect
+
+# Log2 transform
+if(log2.transform){
+data.matrix<-data.matrix+3e-208
+data.matrix<-log(data.matrix,base=2)
+}
+# calculate the number of expressed genes for each sample
+expgene.num<-apply(data.matrix>0,2,sum)
+##################
+# PCA analysis
+library(gplots)
+# calculate the SVD
+temp.sd<-apply(data.matrix,1,sd)
+data.matrix<-data.matrix[temp.sd>0,]  #23861 genes
+data.matrix.norm<-my.normalize(data.matrix)
+my.svd<-svd(data.matrix.norm)
+cumsum(my.svd$d^2/sum(my.svd$d^2))[1:3]
+my.projected<-t(data.matrix.norm)%*%my.svd$u 
+my.colors<-factor(as.matrix(clinic.matrix)[,"pheno_group"],levels=c("Other","Non-acute, Stage I, untreated"))
+my.colors<-my.distinct.colors[as.numeric(my.colors)]
+open3d()
+plot3d(my.projected[,1],my.projected[,2],my.projected[,3],xlab="PC 1",ylab="PC 2",zlab="PC 3",col=my.colors,type="s", size=1,box = F,axes = T)
+par3d(windowRect = c(0, 0, 400, 400))
+legend3d("topright", legend = c("Other","Non-acute, Stage I, untreated"), pch = 16, col = my.distinct.colors[1:length(unique(my.colors))], cex=0.65, inset=c(0))
+rglwidget()
+#filename<-writeWebGL(dir=file.path(pca.dir,"pca_3d"),reuse=TRUE)
+# label the samples based on subjects and disease
+
+#identify3d(my.projected[,1],my.projected[,2],my.projected[,3],labels=colnames(data.matrix.norm),n=ncol(data.matrix.norm),plot=TRUE)
+# label samples using subject ID
+
+```
+
+### DEGs (GRADS PBMC)
+
+We identify the differentially expressed genes between given groups of subjects using DESeq2. Do not include remitting group for this analysis.
 
 ```{r}
 library(DESeq2)
 library(apeglm)
 source(file.path(home.dir,"Rprogram/my_functions.R"))
+#count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","DESeq2_normalized_276_clean.RDS")
 count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","rawcounts_baseline_276_clean.txt")
 clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS")
 output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2")
@@ -1239,12 +1612,12 @@ clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
 clinic.matrix<-clinic.matrix[colnames(count.matrix),]
 
 # replace space in the PHENGRP values with -
-clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="-")
-clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="-")
-clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="--",replace="-")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="_")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="-",replace="_")
 ```
 
-Stage II-III, untreated vs Stage IV, untreated:
+#### Stage II-III, untreated vs Stage IV, untreated:
 ```{r}
 # comparing:
 # Stage II-III untreated vs stage IV untreated
@@ -1253,9 +1626,10 @@ Stage II-III, untreated vs Stage IV, untreated:
 #  Acute sarcoid untreated vs stage IV untreated
 # patients on steroid vs not on steroid
 my.coldata<-clinic.matrix
-my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Stage-II-III-untreated","Stage-IV-untreated"),]
-my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage-II-III-untreated","Stage-IV-untreated"))
-my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage-II-III-untreated")
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Stage_II_III_untreated","Stage_IV_untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage_II_III_untreated","Stage_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage_II_III_untreated")
+table(my.coldata$PHENGRP)
 dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
                               colData = my.coldata,
                               design = ~ PHENGRP)
@@ -1264,7 +1638,7 @@ dds <- dds[keep,]
 my.annot.matrix<-annot.matrix[keep,]
 dds<-DESeq(dds)
 res<-results(dds)
-resLFC <- lfcShrink(dds, coef="PHENGRP_Stage.IV.untreated_vs_Stage.II.III.untreated", type="apeglm")
+resLFC <- lfcShrink(dds, coef="PHENGRP_Stage_IV_untreated_vs_Stage_II_III_untreated", type="apeglm")
 
 res05<-results(dds,alpha=0.05)
 summary(res05)
@@ -1285,7 +1659,7 @@ write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 cat("There are ",sum(res$padj<0.05)," genes with FDR<0.05.\n",sep="")
 ```
 
-Stage I, untreated vs Stage IV, untreated:
+#### Stage I, untreated vs Stage IV, untreated:
 ```{r}
 # comparing:
 # Stage II-III untreated vs stage IV untreated
@@ -1294,9 +1668,10 @@ Stage I, untreated vs Stage IV, untreated:
 #  Acute sarcoid untreated vs stage IV untreated
 # patients on steroid vs not on steroid
 my.coldata<-clinic.matrix
-my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-IV-untreated"),]
-my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non-acute-Stage-I-untreated","Stage-IV-untreated"))
-my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non-acute-Stage-I-untreated")
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non_acute_Stage_I_untreated","Stage_IV_untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non_acute_Stage_I_untreated","Stage_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non_acute_Stage_I_untreated")
+table(my.coldata$PHENGRP)
 dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
                               colData = my.coldata,
                               design = ~ PHENGRP)
@@ -1326,7 +1701,8 @@ write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
 ```
 
-Stage I & II-III, untreated vs Stage IV, untreated:
+
+#### Stage I, untreated vs Stage II-III, untreated:
 ```{r}
 # comparing:
 # Stage II-III untreated vs stage IV untreated
@@ -1335,10 +1711,10 @@ Stage I & II-III, untreated vs Stage IV, untreated:
 #  Acute sarcoid untreated vs stage IV untreated
 # patients on steroid vs not on steroid
 my.coldata<-clinic.matrix
-my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated","Stage-IV-untreated"),]
-my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated")]<-"Stage-I-II-III-untreated"
-my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage-I-II-III-untreated","Stage-IV-untreated"))
-my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage-I-II-III-untreated")
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non_acute_Stage_I_untreated","Stage_II_III_untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non_acute_Stage_I_untreated","Stage_II_III_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non_acute_Stage_I_untreated")
+table(my.coldata$PHENGRP)
 dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
                               colData = my.coldata,
                               design = ~ PHENGRP)
@@ -1365,6 +1741,92 @@ resSig <- subset(resOrdered, padj < 0.05)
 write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 
 # describe how many genes pass the FDR threshold
+table(my.coldata$PHENGRP)
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+#### Stage II-III, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Stage_II_III_untreated","Stage_IV_untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage_II_III_untreated","Stage_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage_II_III_untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+#### Stage I untreated vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non_acute_Stage_I_untreated","Stage_II_III_untreated","Stage_IV_untreated"),]
+my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Stage_II_III_untreated","Stage_IV_untreated")]<-"Stage_II_IV_untreated"
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non_acute_Stage_I_untreated","Stage_II_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non_acute_Stage_I_untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+table(my.coldata$PHENGRP)
 cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
 ```
 
@@ -1493,6 +1955,908 @@ write.csv(cmd.out, file=output.filepath,row.names=FALSE)
 # describe how many genes pass the FDR threshold
 cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
 ```
+
+#### Batch effect check
+
+Since we found big difference between stage I untreated and stage III untreated, we want to double check to see if this was caused by the batch effect. 
+
+To assess the batch effect in this dataset, we performed principal component analysis (PCA) on the whole dataset and calculate the distance between every two samples in the space formed by the top 3 principal components (PCs). The correlation bewteen this distance and the number of days between the processing dates of the corresponding two samples was visualized and examined using Spearman correlation test. 
+
+
+```{r}
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+library(xlsx)
+home.dir<-"/home/yanxiting/driver_Grace"
+date.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/Sample_SpreadSheet_20160826_updated.xlsx")
+
+# extract the processing date of all samples
+temp.data<-read.xlsx(date.filepath,sheetIndex = 1,check.names=F)
+
+temp1<-temp.data$Run_date
+names(temp1)<-as.matrix(temp.data)[,"Sample ID1"]
+temp1<-temp1[!is.na(temp1)]
+temp1<-temp1[(!is.na(names(temp1))) & (names(temp1)!="NA")]
+temp.date<-temp1
+
+temp1<-temp.data$Run_date
+names(temp1)<-as.matrix(temp.data)[,"Sample ID2"]
+temp1<-temp1[!is.na(temp1)]
+temp1<-temp1[(!is.na(names(temp1))) & (names(temp1)!="NA")]
+temp.date<-c(temp.date,temp1)
+
+temp1<-temp.data$Run_date
+names(temp1)<-as.matrix(temp.data)[,"Sample ID3"]
+temp1<-temp1[!is.na(temp1)]
+temp1<-temp1[(!is.na(names(temp1))) & (names(temp1)!="NA")]
+temp.date<-c(temp.date,temp1)
+
+# retrieve the sample ID with run names for the stage I and stage II-III samples
+count.filepath.1<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","rawcounts_baseline_276_clean.txt")
+count.filepath.2<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","rawcounts_corrected_all.txt")
+matched.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx")
+
+count.matrix<-read.table(count.filepath.1,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+count.matrix.1<-count.matrix
+count.matrix.gradsid<-colnames(count.matrix.1)
+
+# convert the colnames of count.matrix.1 into kit ID without run names
+matched.data<-read.xlsx(matched.filepath,sheetIndex = 3,check.names=F)
+matched.data<-matched.data[,1:5]
+temp.names<-unname(as.matrix(matched.data)[2,])
+matched.data<-matched.data[3:nrow(matched.data),]
+colnames(matched.data)<-temp.names
+
+my.matched.data<-matched.data[matched.data[,1]%in%colnames(count.matrix.1),]
+rownames(my.matched.data)<-my.matched.data[,1]
+my.matched.data<-my.matched.data[colnames(count.matrix.1),]
+colnames(count.matrix.1)<-my.matched.data[,2]
+
+# extract the colnames of count.matrix.2 without run names
+count.matrix<-read.table(count.filepath.2,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+count.matrix.2<-count.matrix
+
+temp.vect<-unname(sapply(colnames(count.matrix.2),my.element.extract,splitchar="_",index=1))
+temp<-colnames(count.matrix.2)[temp.vect%in%colnames(count.matrix.1)]
+temp.vect<-temp.vect[temp.vect%in%colnames(count.matrix.1)]
+
+temp.list<-split(temp,temp.vect)
+
+my.temp.list<-temp.list[unlist(lapply(temp.list,length))>1]
+my.matched.list<-list()
+for(i in 1:length(my.temp.list)){
+  my.matched.list[[i]]<-numeric()
+  for(j in 1:length(my.temp.list[[i]])){
+    my.matched.list[[i]]<-c(my.matched.list[[i]],sum(count.matrix.1[,names(my.temp.list)[i]]==count.matrix.2[,my.temp.list[[i]][j]]))
+  }
+}
+
+for(i in 1:length(my.temp.list)){
+  temp.list[names(temp.list)==names(my.temp.list)[i]][[1]]<-temp.list[names(temp.list)==names(my.temp.list)[i]][[1]][my.matched.list[[i]]==26485]
+}
+
+sample.matrix<-cbind(unname(unlist(temp.list)),names(temp.list))
+names(count.matrix.gradsid)<-colnames(count.matrix.1)
+sample.matrix<-cbind(sample.matrix,count.matrix.gradsid[sample.matrix[,2]])
+colnames(sample.matrix)<-c("kit_run","kit","grads_id")
+output.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/baseline_276_clean_samplematrix.txt")
+write.table(sample.matrix,file=output.filepath,append=F,sep="\t",row.names=F,col.names=T,quote=F)
+# extract the kit IDs for stage I and stage III
+count.matrix<-count.matrix.1
+colnames(count.matrix)<-count.matrix.gradsid
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2")
+
+# loading the clinic data and match it with the raw count matrix
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.matrix<-clinic.matrix[colnames(count.matrix),]
+
+# replace space in the PHENGRP values with -
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="_")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="-",replace="_")
+
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non_acute_Stage_I_untreated","Stage_II_III_untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non_acute_Stage_I_untreated","Stage_II_III_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non_acute_Stage_I_untreated")
+table(my.coldata$PHENGRP)
+
+temp.list<-split(rownames(my.coldata),my.coldata$PHENGRP)
+rownames(sample.matrix)<-sample.matrix[,3]
+temp.list[[1]]<-sample.matrix[temp.list[[1]],1]
+temp.list[[2]]<-sample.matrix[temp.list[[2]],1]
+
+date.list<-list()
+for(i in 1:length(temp.list)){
+  temp<-temp.date[temp.list[[i]]]
+  rownames(sample.matrix)<-sample.matrix[,1]
+  names(temp)<-sample.matrix[names(temp),3]
+  date.list[[i]]<-temp
+}
+names(date.list)<-names(temp.list)
+
+# compare the day difference between every two samples within each group to those bewteen group to see if they are significnatly different.
+
+temp1<-as.Date(date.list[[1]],format="%Y-%m-%d")
+temp2<-as.Date(date.list[[2]],format="%Y-%m-%d")
+
+within.group.dist<-numeric()
+for(i in 2:length(temp1)){
+  for(j in 1:(i-1)){
+    within.group.dist<-c(within.group.dist,abs(as.numeric(temp1[i]-temp1[j])))
+  }
+}
+within.group.dist.1<-within.group.dist
+
+
+within.group.dist<-numeric()
+for(i in 2:length(temp2)){
+  for(j in 1:(i-1)){
+    within.group.dist<-c(within.group.dist,abs(as.numeric(temp2[i]-temp2[j])))
+  }
+}
+within.group.dist.2<-within.group.dist
+
+
+between.group.dist<-numeric()
+for(i in 1:length(temp1)){
+  for(j in 1:length(temp2)){
+    between.group.dist<-c(between.group.dist,abs(as.numeric(temp1[i]-temp2[j])))
+  }
+}
+
+
+wilcox.test(within.group.dist.1,between.group.dist)
+
+wilcox.test(within.group.dist.2,between.group.dist)
+```
+
+### WGCNA (GRADS PBMC DEGs)
+
+We take the PBMC DEGs as pre-defined gene set and assess its enrichment in the UCSF cohort data using GSEA.
+
+#### data loading
+
+First, we load in the gene expression data from UCSF cohort, which was normalized using DESeq2. We'll use the log2(DESeq2+1) as the expression data.
+
+```{r}
+# load in the normalized count matrix
+library(xlsx)
+home.dir<-"/home/yanxiting/driver_Grace"
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+
+deseq2.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/data/DESeq2log2_celldiffadjusted_nooutliers.RDS")
+my.data<-readRDS(deseq2.filepath,refhook = NULL)
+
+anno.data<-my.data[,1:6]
+rownames(my.data)<-as.matrix(my.data)[,1]
+fpkm.matrix<-my.data[,7:ncol(my.data)]
+
+#log2 transform, if yes, do the analysis on log2(fpkm.matrix+1) to avoid log2(0) transformation
+log2.transform<-F
+if(log2.transform){
+fpkm.matrix<-fpkm.matrix+1
+fpkm.matrix<-log(fpkm.matrix,base=2)
+}
+fpkm<-fpkm.matrix
+
+# filter out genes with no variation and centralize the data 
+temp.sd<-apply(fpkm,1,sd)
+fpkm<-fpkm[temp.sd>0,]
+anno.data<-anno.data[anno.data[,1]%in%rownames(fpkm),]
+removed_genes <- rownames(fpkm)[temp.sd<=0] 
+
+```
+
+Second, we load in the phenotype data.
+
+```{r}
+home.dir<-"/home/yanxiting/driver_Grace"
+data.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/data/cxr_merge_ucsf_seq.xlsx")
+clinic.data<-read.xlsx(data.filepath,sheetIndex = 1,check.names=F,stringsAsFactors=FALSE)
+```
+
+We match the order of columns in fpkm and rows of clinic.data.
+
+```{r}
+temp.names<-intersect(colnames(fpkm),clinic.data$sample_names)
+fpkm.data<-fpkm[,temp.names]
+rownames(clinic.data)<-clinic.data$sample_names
+clinic.data<-clinic.data[temp.names,]
+
+# extract the data for Stage I and Stage II-IV
+my.fpkm.data<-fpkm.data[,clinic.data$CXR_stage%in%c(1,2,3,4)]
+my.clinic.data<-clinic.data[clinic.data$CXR_stage%in%c(1,2,3,4),]
+
+```
+
+We output the matched expression matrix and clinical data into text files.
+
+```{r}
+# extract the patients data
+my.fpkm.data<-my.fpkm.data[,!is.na(my.clinic.data$CXR_stage)]
+my.clinic.data<-my.clinic.data[!is.na(my.clinic.data$CXR_stage),]
+
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/GSEA_PBMCDEGs_log2DESeq2_adjusted")
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+fpkm.output.filepath<-file.path(output.dir,"DESeq2_log2_sarconly_matched_nooutliers.RDS")
+clinic.output.filepath<-file.path(output.dir,"clinic_data_sarconly_matched_nooutliers.RDS")
+fpkm.annot.output.filepath<-file.path(output.dir,"DESeq2_log2_annot_sarconly_matched_nooutliers.RDS")
+
+
+saveRDS(fpkm.data,file=fpkm.output.filepath,refhook = NULL)
+saveRDS(clinic.data,file=clinic.output.filepath,refhook = NULL)
+saveRDS(anno.data,file=fpkm.annot.output.filepath,refhook = NULL)
+```
+
+Last, load in the DEGs from GRADS PBMC data by comparing stage I untreated to stage II-IV untreated.
+
+```{r}
+data.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2/DEGs_fdr0.05_PHENGRP_Stage_II_IV_untreated_vs_Non_acute_Stage_I_untreated.csv")
+gene.list<-read.csv(data.filepath)
+```
+
+#### GSEA input file generation
+We first generate file containing both the clinical matrix and CT scan features so that both group 1 and group 2 in the GSEA analysis can be defined based on combinations of clinical traits and CT scan data.
+
+We first generate the gene set file.
+
+```{r}
+output.folder<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/GSEA_PBMCDEGs_log2DESeq2_adjusted/no_outliers_withID")
+if(file.exists(output.folder)==F){
+  dir.create(output.folder)
+}
+
+output.filepath<-file.path(output.folder,"GRADS_PBMC_DEGs_I_II-IV_FDR0.05.gmt")
+
+cmd.out<-paste("PBMC_DEGs","\t","DEGs of stage I vs II-IV in GRADS PBMC","\t",sep="")
+cmd.out<-paste(cmd.out,paste(as.matrix(gene.list)[,1],collapse="\t"),sep="")
+cat(cmd.out,file=output.filepath,append=F)
+
+```
+
+
+##### Stage I vs II-IV untreated
+We generate input files for the differential expressed genes between nonacute stage I untreated vs II-IV. 
+
+```{r}
+# note this function is slightly different for DESeq2 Norm data and the TPM matrix
+#my_gsea_filecreate_binary<-function(fpkm.filepath,clinic.filepath,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
+my_gsea_filecreate_binary<-function(fpkm.matrix,clinic.matrix,fpkm.matrix.anno,var.names,group1.values,group2.values,group1.name="group1",group2.name="group2",output.dir,suffix.name){
+  #####################################################################################################################################################
+  # Arguments:
+  # 
+  # gexp.filepath is the file path of the TPM matrix with first 5 columns being annotation for genes 
+  # (TPM_baseline_276_clean_celldiffadjusted_withannot.txt).
+  # 
+  # clinic.filpath is the file path of the clinic data (clinic_matrix_merged.txt). The first row needs to be the column names.
+  # 
+  # var.names is a vector containing the names of columns in clinic.filepath that you want to generate the phenotype file for.
+  #
+  # group1.values is a data.frame of string describing values of var.names that are considered as gorup 1. 
+  # For example, group1.values=data.frame(PHENGRP="nonacute Stage I untreated"). Note that the columns in group1.values need to match those in var.names if there are
+  # more than 1 variable to define the groups.
+  #
+  # group2.values has the same format as group1.values but is the settings for group2.
+  #
+  # group1.name is the name you want to call your group1 in the cls file.
+  #
+  # group2.name is the name you want to call your group2 in the cls file.
+  # 
+  # output.dir is the folder name where you want to save the created files.
+  #
+  # suffix.name is the suffix name in the name of the output files. The gct file will be named as gct_suffix.name.gct and cls file will be named as
+  # cls_suffix.name.gct. For example, if suffix.name="test", the gct file will be named "gct_test.gct" and the cls file will be named as 
+  # "cls_test.cls".
+  # 
+  # Value:
+  #
+  # This function will return 0 if successfully ran. Otherwise, it will return 1. If unsuccessful, information regarding what went wrong will be spit 
+  # out as warning messages.
+  #
+  # When ran successfully, this function will create two files under the specified output.dir named gct_var.name.gct and cls_var.name.cls, where 
+  # var.name will be the speficied value 
+  # in the argument. These two files can be directly loaded into GSEA together with another gene set file that needs to be generated outside of this 
+  # function.
+  #####################################################################################################################################################
+  
+  #  generate the gene expression matrix input file for GSEA
+  #fpkm.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data_adjusted2","TPM_baseline_276_clean_celldiffadjusted_withannot.txt")
+  #clinic.filepath<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.txt"
+  #output.dir<-"/home/yanxiting/driver_Grace/scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/GSEA_knowngenes"
+  # suffix.name<-"analysis1"
+  
+  
+  # load in the fpkm matrix
+  #fpkm.matrix<-read.table(fpkm.filepath,sep="\t",header=T,check.names=F,as.is=TRUE,comment.char = "")
+  #fpkm.matrix.anno<-fpkm.matrix[,1:6]
+  #fpkm.matrix<-fpkm.matrix[,7:ncol(fpkm.matrix)]
+  
+  # load in the clinical data and subset the samples to those listed in the fpkm.matrix
+  #clinic.matrix=read.table(clinic.filepath,sep="\t",header=T,check.names=F,stringsAsFactors=F)
+  #rownames(clinic.matrix)<-as.matrix(clinic.matrix)[,1] # GRADS ID
+  clinic.matrix<-clinic.matrix[colnames(fpkm.matrix),]
+
+  # based on var.name, group1.values, and group2.values, identify the samples to include in the files.
+  if(file.exists(output.dir)==F){
+    dir.create(output.dir)
+  }
+  
+  gct.filepath<-file.path(output.dir,paste("gexp_",suffix.name,".gct",sep=""))
+  cls.filepath<-file.path(output.dir,paste("cls_",suffix.name,".cls",sep=""))
+  cls.filepath.2<-file.path(output.dir,paste("cls_",suffix.name,"_withIDs.cls",sep=""))
+  # substract samples with var.name equal to the values in group1.values and group2. values
+  temp1<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group1.values,1,paste,collapse="_")]
+  #cat("\n")
+  #cat(apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_"))
+  #cat("\n")
+  temp2<-fpkm.matrix[,apply(as.data.frame(clinic.matrix[,var.names]),1,paste,collapse="_")%in%apply(group2.values,1,paste,collapse="_")]
+  cat("There are ",ncol(temp1)," and ", ncol(temp2)," samples for group1 and group2, respectively.\n")
+  data.matrix<-cbind(temp1,temp2)
+  data.matrix.id<-colnames(data.matrix)
+  data.matrix<-cbind(fpkm.matrix.anno[,1],rep("na",nrow(data.matrix)),data.matrix)
+  colnames(data.matrix)[1:2]<-c("NAME","Description")
+  pheno.vect<-c(rep(0,ncol(temp1)),rep(1,ncol(temp2)))
+  data.matrix.pheno<-clinic.matrix[data.matrix.id,]  
+  # output the gene expression data
+  cmd.out<-"#1.2\n"
+  cmd.out<-paste(cmd.out,nrow(data.matrix),"\t",ncol(data.matrix)-2,"\n",sep="")
+  cat(cmd.out,file=gct.filepath,append=F)
+  write.table(data.matrix,sep="\t",file=gct.filepath,append=T,row.names=F,col.names=T,quote=F)
+  
+  #write.table(data.matrix,sep="\t",file=gct.filepath.2,append=F,row.names=T,col.names=T,quote=F)
+  
+  # output the phenotype file
+  cmd.out<-paste(ncol(data.matrix)-2," ",2," ",1,"\n",sep="")
+  cmd.out<-paste(cmd.out,"# group1 group2\n",sep="")
+  cat(cmd.out,file=cls.filepath,append=F,sep="")
+  cat(pheno.vect,file=cls.filepath,append=T,sep=" ")
+  
+  # output the whole clinic data
+  write.table(data.matrix.pheno,file=cls.filepath.2,append=F,sep="\t",row.names = T,col.names=T,quote=F)
+  
+  results<-list(group1=temp1,group2=temp2)
+  
+  return(results)
+}
+
+
+output.folder<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/Laura_Koth/GSEA_PBMCDEGs_log2DESeq2_adjusted/no_outliers_withID")
+
+# analysis 1b
+varnames<-c("CXR_stage")
+temp<-my_gsea_filecreate_binary(fpkm.matrix=fpkm.data,
+                          clinic.matrix = clinic.data,
+                          fpkm.matrix.anno = anno.data,
+                          var.names = varnames,
+                          group1.values = data.frame(CXR_stage=c("1")),
+                          group2.values = data.frame(PHENGRP=c("2","3","4")),
+                          output.dir=output.folder,
+                          suffix.name="analysis1b"
+                          )
+```
+
+Here's a table showing the breakdown of the patients based on CXR_stage.
+```{r}
+table(my.clinic.data$CXR_stage)
+```
+
+
+
+
+### PBMC DEGs in BAL WGCNA results
+
+We look for the PBMC DEGs in the BAL WGCNA results to see if they cluster in certain module.
+
+```{r}
+
+# load in the PBMC DEGs list
+deg.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2/DEGs_fdr0.05_PHENGRP_Stage_II_IV_untreated_vs_Non_acute_Stage_I_untreated.csv")
+deg.matrix<-read.csv(deg.filepath,header=T)
+
+# load in the list of member genes for each gene module from BAL WGCNA results.
+module.file<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_BAL_hg38/WGCNA_BAL/CV0_compare/module_assignment_outliers_7_withnumbers.txt")
+module.matrix<-read.table(module.file,sep="\t",header=T)
+
+cat("There are ",sum(deg.matrix$GeneID%in%module.matrix$gene_names)," genes overlapped.\n")
+
+temp.matrix<-module.matrix[module.matrix$gene_names%in%deg.matrix$GeneID,]
+
+```
+
+### DEGs (GRADS BAL)
+
+We identify the differentially expressed genes between given groups of subjects using DESeq2 using the BAL samples to see if the PBMC DEGs can be validated in BAL. Do not include remitting group for this analysis.
+
+#### data loading
+
+```{r}
+library(DESeq2)
+library(apeglm)
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+#count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","DESeq2_normalized_276_clean.RDS")
+count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_BAL_hg38","rawcounts_matrix_corrected_BAL209_withAnnot.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Data/SARC_combine_clinical_data20170814.txt")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2_GRADS_BAL")
+
+if(file.exists(output.dir)==F){
+  dir.create(output.dir)
+}
+
+# load in the raw counts matrix
+count.matrix<-read.table(count.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+colnames(count.matrix)<-unname(sapply(colnames(count.matrix),my.element.extract,splitchar="_",index=1))
+# loading the clinic data and match it with the raw count matrix
+#clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+
+# coding for PHENGRP:
+#1=Multi-organ
+#2=Non-acute, Stage I, untreated
+#3=Stage II-III, treated
+#4=Stage II-III, untreated
+#5=Stage IV, treated
+#6=Stage IV, untreated
+#7=Acute Sarcoidosis, untreated
+#8=Remitting, untreated
+#9=Cardiac defining therapy
+
+clinic.matrix<-read.table(clinic.filepath,sep="\t",header=T,check.names=F,as.is=TRUE)
+
+# extract the sample IDs for all the rows in clinic.matrix
+mkey<-read.xls(file.path(home.dir,"scratch/GRADS/SARC_results/Data/GRADS Master Progress Key 6-13-16.xlsx"),sheet=3,check.names=F,stringsAsFactors = F)
+mkey<-mkey[3:nrow(mkey),1:5]
+colnames(mkey)<-c("GRADS_ID","BloodKitsEnrollment","BloodKitsMonth6","BALKits","Phenotype")
+#grep only the sarcoidosis grads ids (3rd letter S)
+temp<-grep("^.{2}S", mkey[,1])
+mkey<-mkey[temp,]
+#grep only the 209 sarcoidosis BAL kit ids (3rd letter S)
+temp<-colnames(count.matrix)
+mkey<-mkey[mkey[,4]%in%temp,]
+rownames(mkey)<-mkey[,1]
+clinic.matrix<-cbind(clinic.matrix,mkey[clinic.matrix[,1],4])
+colnames(clinic.matrix)[ncol(clinic.matrix)]<-"kit_id"
+rownames(clinic.matrix)<-clinic.matrix$kit_id
+
+clinic.matrix<-clinic.matrix[colnames(count.matrix),]
+
+# replace space in the PHENGRP values with -
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="_")
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="")
+#clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="-",replace="_")
+```
+
+
+
+#### Stage II-III, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+
+#1=Multi-organ
+#2=Non-acute, Stage I, untreated
+#3=Stage II-III, treated
+#4=Stage II-III, untreated
+#5=Stage IV, treated
+#6=Stage IV, untreated
+#7=Acute Sarcoidosis, untreated
+#8=Remitting, untreated
+#9=Cardiac defining therapy
+
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c(4,6),]
+temp.vect<-my.coldata$PHENGRP
+temp.vect[temp.vect==4]<-"Stage_II_III_untreated"
+temp.vect[temp.vect==6]<-"Stage_IV_untreated"
+my.coldata$PHENGRP<-temp.vect
+table(my.coldata$PHENGRP)
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage_II_III_untreated","Stage_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage_II_III_untreated")
+
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+# remove genes with too low count
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds,name="PHENGRP_Stage_IV_untreated_vs_Stage_II_III_untreated",alpha=0.05)
+resLFC <- lfcShrink(dds, coef="PHENGRP_Stage_IV_untreated_vs_Stage_II_III_untreated", type="apeglm")
+
+res05<-results(dds,name="PHENGRP_Stage_IV_untreated_vs_Stage_II_III_untreated",alpha=0.05)
+summary(res05)
+plotMA(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+#### Stage I, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+
+#1=Multi-organ
+#2=Non-acute, Stage I, untreated
+#3=Stage II-III, treated
+#4=Stage II-III, untreated
+#5=Stage IV, treated
+#6=Stage IV, untreated
+#7=Acute Sarcoidosis, untreated
+#8=Remitting, untreated
+#9=Cardiac defining therapy
+
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c(2,6),]
+temp.vect<-my.coldata$PHENGRP
+temp.vect[temp.vect==2]<-"Stage_I_untreated"
+temp.vect[temp.vect==6]<-"Stage_IV_untreated"
+my.coldata$PHENGRP<-temp.vect
+table(my.coldata$PHENGRP)
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage_I_untreated","Stage_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage_I_untreated")
+
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+# remove genes with too low count
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds,name="PHENGRP_Stage_IV_untreated_vs_Stage_I_untreated",alpha=0.05)
+resLFC <- lfcShrink(dds, coef="PHENGRP_Stage_IV_untreated_vs_Stage_I_untreated", type="apeglm")
+
+res05<-results(dds,name="PHENGRP_Stage_IV_untreated_vs_Stage_I_untreated",alpha=0.05)
+summary(res05)
+plotMA(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+#### Stage I, untreated vs Stage II-III, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+
+#1=Multi-organ
+#2=Non-acute, Stage I, untreated
+#3=Stage II-III, treated
+#4=Stage II-III, untreated
+#5=Stage IV, treated
+#6=Stage IV, untreated
+#7=Acute Sarcoidosis, untreated
+#8=Remitting, untreated
+#9=Cardiac defining therapy
+
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c(2,4),]
+temp.vect<-my.coldata$PHENGRP
+temp.vect[temp.vect==2]<-"Stage_I_untreated"
+temp.vect[temp.vect==4]<-"Stage_II_III_untreated"
+my.coldata$PHENGRP<-temp.vect
+table(my.coldata$PHENGRP)
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Stage_I_untreated","Stage_II_III_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Stage_I_untreated")
+
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+# remove genes with too low count
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds,name="PHENGRP_Stage_II_III_untreated_vs_Stage_I_untreated",alpha=0.05)
+resLFC <- lfcShrink(dds, coef="PHENGRP_Stage_II_III_untreated_vs_Stage_I_untreated", type="apeglm")
+
+res05<-results(dds,name="PHENGRP_Stage_II_III_untreated_vs_Stage_I_untreated",alpha=0.05)
+summary(res05)
+plotMA(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm=T)," genes with FDR<0.05.\n",sep="")
+```
+
+#### Stage I untreated vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+
+#1=Multi-organ
+#2=Non-acute, Stage I, untreated
+#3=Stage II-III, treated
+#4=Stage II-III, untreated
+#5=Stage IV, treated
+#6=Stage IV, untreated
+#7=Acute Sarcoidosis, untreated
+#8=Remitting, untreated
+#9=Cardiac defining therapy
+
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c(2,4,6),]
+temp.vect<-my.coldata$PHENGRP
+temp.vect[temp.vect==2]<-"Non_acute_Stage_I_untreated"
+temp.vect[temp.vect==4 | temp.vect==6]<-"Stage_II_IV_untreated"
+my.coldata$PHENGRP<-temp.vect
+table(my.coldata$PHENGRP)
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non_acute_Stage_I_untreated","Stage_II_IV_untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non_acute_Stage_I_untreated")
+
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+resultsNames(dds)
+res<-results(dds,name="PHENGRP_Stage_II_IV_untreated_vs_Non_acute_Stage_I_untreated")
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+#### Other comparisons
+Acute sarcoid, untreated vs Stage IV, untreated:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Acute-Sarcoidosis-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Acute-Sarcoidosis-untreated","Stage-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Acute-Sarcoidosis-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+Steroid vs non-steroid usage patients:
+```{r}
+# comparing:
+# Stage II-III untreated vs stage IV untreated
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix[!is.na(clinic.matrix$steroid_atv1),]
+my.coldata$steroid_atv1<-factor(my.coldata$steroid_atv1,levels=c(0,1))
+my.coldata$steroid_atv1 <- relevel(my.coldata$steroid_atv1, ref = "0")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ steroid_atv1)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+Stage I vs Stage II-IV, untreated:
+```{r}
+# comparing:
+# Non-acute, Stage I, untreated vs c("Stage II-III, untreated","Stage IV, untreated")
+# Stage I untreated vs stage IV untreated
+# Stage I, II-III untreated vs Stage IV untreated (BLOOM gene set had pro-inflammatory genes for validation)
+#  Acute sarcoid untreated vs stage IV untreated
+# patients on steroid vs not on steroid
+my.coldata<-clinic.matrix
+my.coldata<-my.coldata[my.coldata$PHENGRP%in%c("Non-acute-Stage-I-untreated","Stage-II-III-untreated","Stage-IV-untreated"),]
+my.coldata$PHENGRP[my.coldata$PHENGRP%in%c("Stage-II-III-untreated","Stage-IV-untreated")]<-"Stage-II-IV-untreated"
+
+my.coldata$PHENGRP<-factor(my.coldata$PHENGRP,levels=c("Non-acute-Stage-I-untreated","Stage-II-IV-untreated"))
+my.coldata$PHENGRP <- relevel(my.coldata$PHENGRP, ref = "Non-acute-Stage-I-untreated")
+dds <- DESeqDataSetFromMatrix(countData = count.matrix[,rownames(my.coldata)],
+                              colData = my.coldata,
+                              design = ~ PHENGRP)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+my.annot.matrix<-annot.matrix[keep,]
+dds<-DESeq(dds)
+res<-results(dds)
+resLFC <- lfcShrink(dds, coef=resultsNames(dds)[2], type="apeglm")
+
+res05<-results(dds,alpha=0.05)
+summary(res05)
+
+# output the results
+output.filepath<-file.path(output.dir,paste("DEGs_all_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cbind(my.annot.matrix,as.data.frame(res))
+cmd.out<-cmd.out[order(res$pvalue,decreasing=F),]
+resOrdered <- res[order(res$pvalue),]
+write.csv(cmd.out, file=output.filepath,row.names = FALSE)
+
+output.filepath<-file.path(output.dir,paste("DEGs_fdr0.05_",resultsNames(dds)[2],".csv",sep=""))
+cmd.out<-cmd.out[!is.na(cmd.out$padj) & cmd.out$padj<0.05,]
+resSig <- subset(resOrdered, padj < 0.05)
+write.csv(cmd.out, file=output.filepath,row.names=FALSE)
+
+# describe how many genes pass the FDR threshold
+cat("There are ",sum(res$padj<0.05,na.rm = T)," genes with FDR<0.05.\n",sep="")
+```
+
+
+### PCA plot (old)
+We generate PCA plot of all the samples labelled using the phenotypic group.
+
+```{r}
+library(DESeq2)
+library(apeglm)
+source(file.path(home.dir,"Rprogram/my_functions.R"))
+count.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data","rawcounts_baseline_276_clean.txt")
+clinic.filepath<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/data/clinic_matrix_merged.RDS")
+output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline/DEGs/DESeq2")
+
+# load in the raw counts matrix
+count.matrix<-read.table(count.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = F)
+annot.matrix<-count.matrix[,1:6]
+count.matrix<-count.matrix[,7:ncol(count.matrix)]
+rownames(count.matrix)<-count.matrix$GeneID
+
+# loading the clinic data and match it with the raw count matrix
+clinic.matrix<-readRDS(clinic.filepath,refhook = NULL)
+clinic.matrix<-clinic.matrix[colnames(count.matrix),]
+
+# replace space in the PHENGRP values with -
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=" ",replace="-")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig=",",replace="-")
+clinic.matrix$PHENGRP<-sapply(clinic.matrix$PHENGRP,my.char.replace,orig="--",replace="-")
+```
+
+## Monocyte Proportion
+
+We compare the monocyte cell differential difference between stage I and II-IV to see if the monocyte cell differential is the reason for the enrichment of genes expressed in monocytes in the DEGs.
+
+```{r fig.width=8,fig.height=8}
+temp1<-clinic.matrix$p_mono[clinic.matrix$PHENGRP=="Non_acute_Stage_I_untreated"]
+temp2<-clinic.matrix$p_mono[clinic.matrix$PHENGRP%in%c("Stage_II_III_untreated")]
+wilcox.test(temp1,temp2,alternative = "less")
+
+
+
+library(ggplot2)
+#boxplot(clinic.matrix$p_mono~clinic.matrix$PHENGRP,besides=T)
+temp.data<-data.frame(PHENGRP=clinic.matrix$PHENGRP,monocyte_perc=clinic.matrix$p_mono)
+p<-ggplot(temp.data,aes(x=PHENGRP,y=monocyte_perc))+geom_boxplot()+geom_jitter(shape=16,position=position_jitter(0.2))+theme(axis.text.x=element_text(angle=45,vjust=,hjust=1))
+p
+
+temp.data<-temp.data[temp.data$PHENGRP%in%c("Non_acute_Stage_I_untreated","Stage_II_III_untreated","Stage_IV_untreated"),]
+p<-ggplot(temp.data,aes(x=PHENGRP,y=monocyte_perc))+geom_boxplot()+geom_jitter(shape=16,position=position_jitter(0.2))+theme(axis.text.x=element_text(angle=45,vjust=,hjust=1))
+p
+
+```
+
+
 
 
 ## edgeR
