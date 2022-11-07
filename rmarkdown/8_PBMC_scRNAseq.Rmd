@@ -76,7 +76,6 @@ figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 home.dir<-"/home/yanxiting/driver_Grace"
 #home.dir<-"/home/xy48"
 source(paste(home.dir,"/Rprogram/my_functions.R",sep=""))
-output.dir<-file.path(home.dir,"scratch/GRADS/SARC_results/Results_summary_PBMC_hg38/baseline")
 ```
 # Data Downloading
 
@@ -154,16 +153,27 @@ Since we have limited storage on the hpc, we back up the fastq.gz files and the 
 
 ```{r}
 # this was run on farnam
+source("/home/yanxiting/driver_Farnam/Rprogram/my_functions.R")
 library(Matrix)
-cellranger.dir<-"/home/xy48/scratch60/SARC_10X/cellranger_results"
+cellranger.dir<-"/home/yanxiting/driver_Farnam/scratch60/SARC_10X/cellranger_results"
+runtable.filepath<-"/home/yanxiting/driver_Farnam/scratch60/SARC_10X/SraRunTable.txt"
+#cellranger.dir<-"/home/xy48/scratch60/SARC_10X/cellranger_results"
+
+# load in the 
+run.table<-read.table(runtable.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+
+# extract the nUMI matrix
 dirnames<-list.files(cellranger.dir)
 
+mat.list<-list()
+merged.matrix<-numeric()
 for(i in 1:length(dirnames)){
-  
+  run.name<-dirnames[i]
+  sample.name<-run.table[run.table[,"Run"]==run.name,"Sample Name"]
   matrix_dir<-file.path(cellranger.dir,dirnames[i],"outs","filtered_feature_bc_matrix")
-  barcode.path <- paste0(matrix_dir, "barcodes.tsv.gz")
-  features.path <- paste0(matrix_dir, "features.tsv.gz")
-  matrix.path <- paste0(matrix_dir, "matrix.mtx.gz")
+  barcode.path <- file.path(matrix_dir, "barcodes.tsv.gz")
+  features.path <- file.path(matrix_dir, "features.tsv.gz")
+  matrix.path <- file.path(matrix_dir, "matrix.mtx.gz")
   mat <- readMM(file = matrix.path)
   feature.names = read.delim(features.path,
                              header = FALSE,
@@ -171,10 +181,18 @@ for(i in 1:length(dirnames)){
   barcode.names = read.delim(barcode.path,
                              header = FALSE,
                              stringsAsFactors = FALSE)
-  colnames(mat) = barcode.names$V1
+  colnames(mat) = paste0(sample.name,"_",barcode.names$V1)
   rownames(mat) = feature.names$V1
   
+  if(i==1){
+    gene.names<-feature.names
+  }else{
+    mat<-mat[feature.names,]
+  }
+  
+  merged.matrix<-cbind(merged.matrix,mat) 
 }
+
 
 ```
 
