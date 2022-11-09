@@ -107,21 +107,42 @@ temp<-sapply(filenames,my.element.extract,splitchar="\\.",index=3)
 filenames<-filenames[temp=="gz"]
 
 for(i in 1:length(filenames)){
-	from.filename<-filenames[i]
-	temp<-my.element.extract(filenames[i],splitchar="\\.",index=1)
-	temp<-my.element.extract(temp,splitchar="_",index=2)
-	if(temp=="1"){
-		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_I1_001.fastq.gz")
-	}
-	if(temp=="2"){
-		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_R1_001.fastq.gz")
-	}
-	if(temp=="3"){
-		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_R2_001.fastq.gz")
-	}
-
-	file.rename(from=file.path(data.dir,from.filename),to=file.path(data.dir,to.filename))
-	cat("from=",file.path(data.dir,from.filename),"\n","to=",file.path(data.dir,to.filename),"\n",sep="")
+  
+  if(substr(filenames[i],1,4)=="SRR9"){
+  	from.filename<-filenames[i]
+  	temp<-my.element.extract(filenames[i],splitchar="\\.",index=1)
+  	temp<-my.element.extract(temp,splitchar="_",index=2)
+  	if(temp=="1"){
+  		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_I1_001.fastq.gz")
+  	}
+  	if(temp=="2"){
+  		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_R1_001.fastq.gz")
+  	}
+  	if(temp=="3"){
+  		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_R2_001.fastq.gz")
+  	}
+  
+  	file.rename(from=file.path(data.dir,from.filename),to=file.path(data.dir,to.filename))
+  	cat("from=",file.path(data.dir,from.filename),"\n","to=",file.path(data.dir,to.filename),"\n",sep="")
+  }else{
+    
+  	from.filename<-filenames[i]
+  	temp<-my.element.extract(filenames[i],splitchar="\\.",index=1)
+  	temp<-my.element.extract(temp,splitchar="_",index=2)
+  	if(temp=="1"){
+  		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_R1_001.fastq.gz")
+  	}
+  	if(temp=="2"){
+  		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_R2_001.fastq.gz")
+  	}
+  	if(temp=="3"){
+  		to.filename<-paste0(my.element.extract(filenames[i],splitchar="_",index=1),"_S1_L001_I1_001.fastq.gz")
+  	}
+  
+  	file.rename(from=file.path(data.dir,from.filename),to=file.path(data.dir,to.filename))
+  	cat("from=",file.path(data.dir,from.filename),"\n","to=",file.path(data.dir,to.filename),"\n",sep="")    
+    
+  }
 }
 ```
 
