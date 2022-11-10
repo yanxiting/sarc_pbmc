@@ -105,6 +105,7 @@ data.dir<-"/home/xy48/scratch_palmer/SARC_10x/test/sra"
 filenames<-list.files(data.dir)
 temp<-sapply(filenames,my.element.extract,splitchar="\\.",index=3)
 filenames<-filenames[temp=="gz"]
+filenames<-filenames[!is.na(filenames)]
 
 for(i in 1:length(filenames)){
   
@@ -185,6 +186,7 @@ run.table<-read.table(runtable.filepath,sep="\t",header=T,check.names=F,stringsA
 
 # extract the nUMI matrix
 dirnames<-list.files(cellranger.dir)
+dirnames<-dirnames[substr(dirnames,1,4)=="SRR1"]
 
 for(i in 1:length(dirnames)){
   run.name<-dirnames[i]
@@ -206,9 +208,27 @@ for(i in 1:length(dirnames)){
   output.filepath<-file.path("/home/yanxiting/driver_Farnam/scratch60/SARC_10X/cellranger_results",paste0(sample.name,"_",run.name,"_nUMI.rds"))
   saveRDS(mat,file=output.filepath,refhook=NULL)
 }
+```
+
+
+## merge replicates
+Some of the runs are for the same samples. We generate the cellranger aggr to merge the results from the cell ranger output of the two runs separately. The merged matrix will be saved using the first run name.
+
+```{r}
+source("/home/yanxiting/driver_Farnam/Rprogram/my_functions.R")
+library(Matrix)
+cellranger.dir<-"/home/yanxiting/driver_Farnam/scratch60/SARC_10X/cellranger_results"
+runtable.filepath<-"/home/yanxiting/driver_Farnam/scratch60/SARC_10X/SraRunTable.txt"
+#cellranger.dir<-"/home/xy48/scratch60/SARC_10X/cellranger_results"
+
+# load in the 
+run.table<-read.table(runtable.filepath,sep="\t",header=T,check.names=F,stringsAsFactors = FALSE)
+temp.list<-split(as.matrix(run.table)[,1],as.matrix(run.table)[,"Sample Name"])
+temp.list[unlist(lapply(temp.list,length))>1]
+
+# generate the scripts to run aggregation algorithm to merge the output.
 
 
 ```
-
 
 
