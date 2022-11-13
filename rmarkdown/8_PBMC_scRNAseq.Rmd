@@ -101,7 +101,7 @@ The cell ranger pipeline recognize fastq file names are formated as [Sample Name
 ```{r}
 # this was run on grace.
 source("~/Rprogram/my_functions.R")
-data.dir<-"/home/xy48/scratch_palmer/SARC_10x/test/sra"
+data.dir<-"/gpfs/ysm/scratch60/xiting_yan/xy48/SARC_10X/fastq"
 filenames<-list.files(data.dir)
 temp<-sapply(filenames,my.element.extract,splitchar="\\.",index=3)
 filenames<-filenames[temp=="gz"]
