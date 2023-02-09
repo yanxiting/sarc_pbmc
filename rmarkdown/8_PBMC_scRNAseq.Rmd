@@ -742,7 +742,7 @@ cat("We saved the seurat object of the integrated data with cell clustering resu
 ```
 
 
-# Visualizing integrated data
+## Visualizing integrated data
 
 ```{r,fig.width=8,fig.height=20}
 library(cowplot)
@@ -757,7 +757,15 @@ plot_grid(p2, p1,p5,ncol=1)
 
 # Integrate with existing data
 
-We obtained another PBMC 10X data annotated in Kaminski lab so that we can integrate this dataset with the annotated data to annotate the cells in this dataset.
+We obtained another PBMC 10X data annotated in Kaminski lab so that we can integrate this dataset with the annotated data to annotate the cells in this dataset. The seurat object containing the annotated PBMC 10x data is under /home/xy48/scratch_palmer/Amy_PBMC on grace hpc. We ran this section of codes on hpc.
+
+## data loading
+
+We first load in the annotated PBMC 10x data from Amy.
+```{r}
+data.filepath<-"/home/yanxiting/driver_Grace/scratch_palmer/Amy_PBMC/01.03.23.controls.for.Xiting.rds"
+amy.10x<-readRDS(data.filepath,refhook = NULL)
+```
 
 Visualize the integrated data by splitting it to different clusters.
 
