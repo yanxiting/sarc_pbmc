@@ -482,8 +482,6 @@ ggsave(filename=file.path(output.dir,"1_datapreprocessing_FeatureScatter.pdf"),p
 gcql1<-subset(gcql1,subset= nFeature_RNA >= 300 & percent.mt<= 50)
 cat("After the third filtering step, we have ",nrow(gcql1@assays$RNA@counts)," genes and ",ncol(gcql1@assays$RNA@counts)," cells.\n",sep="")
 ```
-Based on the quality control plots, in the third filtering step, we removed cells with >50% mitochondrial percentage or  <300 expressed genes. After this second filtering step, we have `r nrow(gcql1@assays$RNA@counts)` genes and `r ncol(gcql1@assays$RNA@counts)` cells remained. 
-
 
 Third, we normalize the unimputed and save the SAVER imputed data as the normalized data. These data are saved for downstream further processing.
 
@@ -510,7 +508,7 @@ features.n<-2000
 home.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
 ```
 
-We load in the normalized unimputed data and find the top `r features.n` variable genes for cell clustering. The normalized data was further scaled to remove the effect of nUMI and percent.mito for further cell clustering purpose.
+We load in the normalized unimputed data and find the top variable genes for cell clustering. The normalized data was further scaled to remove the effect of nUMI and percent.mito for further cell clustering purpose.
 
 ```{r fig.width=10,fig.height=5}
 # load in the normalized unimputed data
@@ -611,7 +609,7 @@ ElbowPlot(object = gcql1,ndims=100)
 pc.num<-46
 ```
 
-Based on the JackStraw plot and the Elbow plot, we decided to use the top `r pc.num` PCs for the unimputed data.
+Based on the JackStraw plot and the Elbow plot, we decided to use the top 46 PCs for the unimputed data.
 
 ```{r}
 saveRDS(gcql1, file = file.path(output.dir,paste("2_dimreduction_data_",length(gcql1@assays$RNA@var.features),"vargenes_pipeline1.rds",sep="")))
@@ -620,9 +618,6 @@ saveRDS(gcql1, file = file.path(output.dir,paste("2_dimreduction_data_",length(g
 cat("We save the R project as\n")
 cat("unimputed data:\t",file.path(output.dir,paste("2_dimreduction_data_",length(gcql1@assays$RNA@var.features),"vargenes_pipeline1.rds",sep="")),"\n",sep="")
 ```
-
-
-Based on the Jackstraw plots, we decided to use the `r pc.num` top PCs for clustering. 
 
 ### Data visualization
 
@@ -1207,6 +1202,10 @@ p2<-DimPlot(merged.combined, reduction = "umap", cells=rownames(merged.combined@
 #p5<-DimPlot(merged.combined, reduction = "umap", group.by="disease", label = TRUE,cols=my.distinct.colors)
 grid.arrange(p1,p2,ncol=1)
 ```
+
+
+
+
 
 #old
 Visualize the integrated data by splitting it to different clusters.
