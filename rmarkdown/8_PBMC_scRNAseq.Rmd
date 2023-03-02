@@ -19,13 +19,12 @@ knitr::opts_chunk$set(eval=TRUE,echo = TRUE,cache=TRUE,warning=FALSE,message = F
 knitr::opts_knit$set(eval.after = 'fig.cap',dev=c('png','postscript'))
 
 
-library(captioner)
 library(circlize)
 library(clusterProfiler)
 library(corrplot)
 library(ComplexHeatmap)
 library(dplyr)
-library(EnsDb.Hsapiens.v86)
+library(EnsDb.Hsapiens.v86) 
 library(gdata)
 library(ggplot2)
 library(ggpubr)
@@ -51,7 +50,6 @@ library(randomcoloR)
 library(kableExtra)
 library(gdata)
 library(knitr)
-library(captioner)
 library(nlme)
 library(rgl)
 library(gplots)
@@ -61,17 +59,6 @@ library(randomcoloR)
 library(ComplexHeatmap)
 
 knit_hooks$set(webgl = hook_webgl)
-
-
-table_nums_1 <- captioner::captioner(prefix="Table",levels=1)
-figure_nums_1<- captioner::captioner(prefix="Figure",levels=1)
-
-
-table_nums_2 <- captioner::captioner(prefix="Table",levels=2)
-figure_nums_2<- captioner::captioner(prefix="Figure",levels=2)
-
-table_nums_3 <- captioner::captioner(prefix="Table",levels=3)
-figure_nums_3 <- captioner::captioner(prefix="Figure",levels=3)
 
 home.dir<-"/home/yanxiting/driver_Grace"
 #home.dir<-"/home/xy48"
@@ -243,26 +230,58 @@ We moved the cellranger aggr results back to cellranger_results together with th
 
 We extract the nUMI vector for the samples included in the original paper.
 
+
 ```{r}
-home.dir<-"/home/yanxiting/driver_Farnam"
+home.dir<-"/home/yanxiting/driver_Grace"
 source(file.path(home.dir,"Rprogram/my_functions.R"))
 library(xlsx)
-runtable.filepath<-file.path(home.dir,"scratch60/SARC_10X/SraRunTable.txt")
-id.filepath<-file.path(home.dir,"scratch60/SARC_10X/scRNA_ids.xlsx")
+runtable.filepath<-file.path(home.dir,"scratch_palmer/SARC_10x/SraRunTable.txt")
+id.filepath<-file.path(home.dir,"scratch_palmer/SARC_10x/scRNA_ids.xlsx")
 
 run.table<-read.table(runtable.filepath,sep="\t",header=T,check.names = F)
 id.table<-read.xlsx(id.filepath,sheetIndex = 1,check.names=F)
 
 my.table<-run.table[run.table$`GEO_Accession (exp)`%in%as.matrix(id.table)[,1],]
 
-filenames<-list.files(file.path(home.dir,"scratch60/SARC_10X/cellranger_results"))
+filenames<-list.files(file.path(home.dir,"scratch_palmer/SARC_10x/cellranger_results"))
+
+# use Read10x to load in the data
+dir.list<-rep("",length(filenames))
+sample.names<-character()
+for(i in 1:length(filenames)){
+  
+  if(substr(filenames[i],1,1)=="G"){
+    dir.list[i]<-file.path(home.dir,"scratch_palmer/SARC_10x/cellranger_results",filenames[i],"outs","count","filtered_feature_bc_matrix")
+  }else{
+    dir.list[i]<-file.path(home.dir,"scratch_palmer/SARC_10x/cellranger_results",filenames[i],"outs","filtered_feature_bc_matrix")
+  }
+  
+  if(substr(filenames[i],1,1)=="G"){
+    sample.names<-c(sample.names,filenames[i])
+  }else{
+    sample.names<-c(sample.names,as.matrix(my.table)[my.table$Run==filenames[i],"Sample Name"])
+  }
+ 
+}
+
+# duplicated gene symbols will be changed to .1, .2, and so on.
+temp<-Read10X(data.dir=dir.list,gene.column=2,cell.column=1)
+temp.num<-as.numeric(sapply(colnames(temp),my.element.extract,splitchar="_",index=1))
+temp1<-sample.names[temp.num]
+temp2<-sapply(colnames(temp),my.element.extract,splitchar="_",index=-1)
+colnames(temp)<-paste(temp1,"_",temp2,sep="")
+output.filepath<-"/home/yanxiting/driver_Grace/scratch_palmer/SARC_10x/merged_nUMI_45_genenames_Read10X.rds"
+saveRDS(temp,file=output.filepath,refhook=NULL)
+
+
+#gcql1<-CreateSeuratObject(counts=temp)
 
 merged.data<-numeric()
 for(i in 1:length(filenames)){
   if(substr(filenames[i],1,1)=="G"){
-    matrix.dir<-file.path(home.dir,"scratch60/SARC_10X/cellranger_results",filenames[i],"outs","count","filtered_feature_bc_matrix")
+    matrix.dir<-file.path(home.dir,"scratch_palmer/SARC_10x/cellranger_results",filenames[i],"outs","count","filtered_feature_bc_matrix")
   }else{
-    matrix.dir<-file.path(home.dir,"scratch60/SARC_10X/cellranger_results",filenames[i],"outs","filtered_feature_bc_matrix")
+    matrix.dir<-file.path(home.dir,"scratch_palmer/SARC_10x/cellranger_results",filenames[i],"outs","filtered_feature_bc_matrix")
   }
   
   barcode.path <- file.path(matrix.dir, "barcodes.tsv.gz")
@@ -282,7 +301,7 @@ for(i in 1:length(filenames)){
   }
   
   colnames(mat) = paste0(sample.name,"_",barcode.names$V1)
-  rownames(mat) = feature.names$V1
+  rownames(mat) = feature.names$V2
   
   if(i==1){
     merged.data<-mat
@@ -292,7 +311,7 @@ for(i in 1:length(filenames)){
   }
 }
 
-output.filepath<-"/home/yanxiting/driver_Farnam/scratch60/SARC_10X/merged_nUMI_45.rds"
+output.filepath<-"/home/yanxiting/driver_Grace/scratch_palmer/SARC_10x/merged_nUMI_45_genenames.rds"
 saveRDS(merged.data,file=output.filepath,refhook=NULL)
 
 ```
@@ -366,25 +385,12 @@ dir.create(output.dir)
 }
 
 # Load the merged data
-merged.data<-readRDS(file.path(home.dir,"Data/merged_nUMI_45.rds"),refhook=NULL)
-
-# load in the genes.gtf to convert ensembl ID to gene names
-gtf.filepath<-"/home/yanxiting/driver_Farnam/scratch60/SARC_10X/refdata-gex-GRCh38-2020-A/genes/genes.gtf"
-gtf.matrix<-read.table(gtf.filepath,sep="\t",header=F,check.names = F, stringsAsFactors = FALSE,skip = 5)
-gtf.matrix<-gtf.matrix[gtf.matrix[,3]=="gene",]
-temp<-gtf.matrix[,9]
-
-gene.id<-unname(sapply(sapply(temp,my.element.extract,splitchar="; ",index=1),my.element.extract,splitchar=" ",index=-1))
-gene.name<-unname(sapply(sapply(temp,my.element.extract,splitchar="; ",index=4),my.element.extract,splitchar=" ",index=-1))
-gene.list<-split(gene.id,gene.name)
-# get the list of ensembl IDs from mitochondrial genes
-mt.genes<-unlist(gene.list[grep("^MT-",names(gene.list))])
+merged.data<-readRDS(file.path(home.dir,"Data/merged_nUMI_45_genenames_Read10X.rds"),refhook=NULL)
 
 #geoff.data <- Read10X(data.dir = file.path(data.dir,"outs","filtered_gene_bc_matrices_mex","GRCh38"))
 #load(file.path(home.dir,"scratch_kaminski/public/Backup/Jonas/R_objects/10x_ChuppAsthma.mtx.hybrid_gene_symbols_wo_background_03_1119.Robj"))
 gcql1 <- CreateSeuratObject(counts = merged.data, project = "SARC_10X",min.cells = 3,  min.features = 200)
-#gcql1[["percent.mt"]] <- PercentageFeatureSet(gcql1, pattern = "^MT-")
-gcql1[["percent.mt"]] <- PercentageFeatureSet(gcql1, features = mt.genes)
+gcql1[["percent.mt"]] <- PercentageFeatureSet(gcql1, pattern = "^MT-")
 
 cat("\n")
 cat("Originally, there are ",nrow(merged.data)," genes and ",ncol(merged.data)," cells in the data.\n",sep="")
@@ -602,7 +608,7 @@ ElbowPlot(object = gcql1,ndims=100)
 ```
 
 ```{r}
-pc.num<-35
+pc.num<-46
 ```
 
 Based on the JackStraw plot and the Elbow plot, we decided to use the top `r pc.num` PCs for the unimputed data.
@@ -618,9 +624,9 @@ cat("unimputed data:\t",file.path(output.dir,paste("2_dimreduction_data_",length
 
 Based on the Jackstraw plots, we decided to use the `r pc.num` top PCs for clustering. 
 
-## Data visualization
+### Data visualization
 
-### UMAP
+#### UMAP
 To identify potential outlying cells and samples, we first label the tSNE plot using disease_samplenames.
 ```{r}
 ########################################################################
@@ -648,9 +654,22 @@ fig3<-DimPlot(sample1,reduction="umap",group.by="disease")
 grid.arrange(fig1,fig2,fig3,ncol=1)
 ```
 
-### tSNE plot
+```{r fig.width=10,fig.height=20,fig.cap="UMAP labeled by a). cell clusters, b). sample names and c). disease for the unimputed data.",cache=FALSE,results='hide'}
+pc.num<-46
+# generate the TSNE plot labeled by labeling samples with different colors 
+sample1<-FindNeighbors(gcql1,dims=1:pc.num)
+sample1<-FindClusters(sample1,resolution=1.2)
+sample1<-RunUMAP(sample1,dims=1:pc.num)
+#sample1<-RunUMAP(sample1,dims=1:pc.num,umap.method="umap-learn")
+fig1<-DimPlot(sample1,reduction="umap")
+fig2<-DimPlot(sample1,reduction="umap",group.by="disease.samplenames")
+fig3<-DimPlot(sample1,reduction="umap",group.by="disease")
+grid.arrange(fig1,fig2,fig3,ncol=1)
+```
+#### tSNE plot
 
-```{r}
+```{r eval=FALSE}
+pc.num<-35
 sample1 <- RunTSNE(sample1, dims= 1:pc.num)
 ```
 
@@ -661,14 +680,13 @@ fig3<-DimPlot(sample1,reduction="tsne",group.by="disease")
 grid.arrange(fig1,fig2,fig3,ncol=1)
 ```
 
-### data saving
+#### data saving
 ```{r}
 saveRDS(sample1, file = file.path(output.dir,paste("2_visualization_data_",length(gcql1@assays$RNA@var.features),"vargenes_pipeline1.rds",sep="")))
 cat("We saved the seurat object with UMAP and tSNE as ",file.path(output.dir,paste("2_visualization_data_",length(sample1@assays$RNA@var.features),"vargenes_pipeline1.rds",sep="")),"\n",sep="")
 ```
 
-
-### Integrative Analysis
+### Cell Typing
 
 ```{r}
 my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
@@ -676,17 +694,18 @@ my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#9
 
 To describe the cell types captured in the data, the integrated analysis may provide cleaner results. Therefore, we conduct the integrated analysis of all the asthma 10X data using Seurat V3.1 in this note to reduce the subject effect in the data visulization and the trajectory analysis at least. 
 
-# data loading
+#### Data Loading
 ```{r data_loading,results='hold'}
 ########################################################
 # 1. load in the singler object
-data.dir<-output.dir
+home.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
+data.dir<-file.path(home.dir,"scRNA-seq/Seurat")
 sample1<-readRDS(file.path(data.dir,"2_visualization_data_2000vargenes_pipeline1.rds"),refhook = NULL)
 
 sample1.raw<-sample1
 ```
 
-# integrating data
+#### integrating data
 
 Split the whole dataset based on subject ID (fresh and DSMO samples from the same subject are considered as one sample). Find anchors to integrate all the datasets together.
 ```{r}
@@ -696,23 +715,31 @@ sample1.list<-lapply(X=sample1.list,FUN=function(x){
   x<-FindVariableFeatures(x,selection.method="vst",nfeatures=2000)
 })
 temp.cellnum<-unlist(lapply(sample1.list,ncol))
+#sample1.list<-sample1.list[temp.cellnum>=40]
 # increase the global maxSize
 options(future.globals.maxSize= 4194304000)
+features <- SelectIntegrationFeatures(object.list = sample1.list)
+#sample1.list <- lapply(X = sample1.list, FUN = function(x) {
+#    x <- ScaleData(x, features = features, verbose = FALSE)
+#    x <- RunPCA(x, features =features, npcs=40,verbose=F)
+#})
 #sample1.anchors<-FindIntegrationAnchors(sample1.list[temp.cellnum>=92],k.filter=92,dims=1:40,verbose=FALSE)
-sample1.anchors<-FindIntegrationAnchors(sample1.list[temp.cellnum>=40],k.filter=40,dims=1:40,verbose=FALSE)
+sample1.anchors<-FindIntegrationAnchors(object.list=sample1.list[temp.cellnum>=700],anchor.features=features, reduction="rpca",k.filter=40,dims=1:40,verbose=FALSE)
 #sample1.combined<-IntegrateData(anchorset=sample1.anchors,features.to.integrate=rownames(sample1.raw@assays$RNA@counts),dims=1:40,verbose=FALSE)
-sample1.combined<-IntegrateData(anchorset=sample1.anchors,dims=1:40,verbose=FALSE)
+#,k.filter=40,dims=1:40
+sample1.combined<-IntegrateData(anchorset=sample1.anchors,verbose=FALSE,k.weight = 45)
 ```
 
 
-```{r data_saving}
+```{r}
+output.dir<-file.path(home.dir,"scRNA-seq/Seurat")
 dir.create(file.path(output.dir,"integrated_analysis"))
 output.filepath<-file.path(output.dir,"integrated_analysis","seurat_object_integrated_allcells.rds")
 saveRDS(sample1.combined,file=output.filepath)
 cat("We saved the integrated data for all cells as ",output.filepath,"\n",sep="")
 
 output.filepath<-file.path(output.dir,"integrated_analysis","seurat_object_original_allcells.rds")
-saveRDS(sample1,file=output.filepath)
+saveRDS(sample1.raw,file=output.filepath)
 cat("We saved the original data for all cells as ",output.filepath,"\n",sep="")
 ```
 
@@ -742,7 +769,7 @@ cat("We saved the seurat object of the integrated data with cell clustering resu
 ```
 
 
-## Visualizing integrated data
+#### Visualizing integrated data
 
 ```{r,fig.width=8,fig.height=20}
 library(cowplot)
@@ -755,18 +782,433 @@ p5<-DimPlot(sample1.combined, reduction = "umap", group.by="disease", label = TR
 plot_grid(p2, p1,p5,ncol=1)
 ```
 
-# Integrate with existing data
+```{r,fig.width=4,fig.height=60}
+# find out the samples with small number of cells and try to see where they are on the UMAP
+temp.cellnum<-table(sample1.combined@meta.data$sample.names)
+temp.names<-names(temp.cellnum)
+temp.cellnum<-as.numeric(temp.cellnum)
+names(temp.cellnum)<-temp.names
+temp.samples<-names(temp.cellnum)[temp.cellnum<=14000]
+temp.samples<-names(sort(temp.cellnum[temp.samples],decreasing=F))
+
+fig.list<-list()
+for(i in 1:length(temp.samples)){
+#  temp.color<-rep("grey",nrow(sample1.combined@meta.data))
+#  temp.color[sample1.combined@meta.data$sample.names==temp.samples[i]]<-"red"
+  fig.list[[i]]<-DimPlot(sample1.combined, reduction = "umap",cells.highlight=rownames(sample1.combined@meta.data)[sample1.combined@meta.data$sample.names==temp.samples[i]],sizes.highlight=0.2)+labs(title=paste0(temp.samples[i],":",temp.cellnum[temp.samples[i]]))
+}
+
+#do.call("grid.arrange", c(fig.list, nrow=length(fig.list)))
+output.filepath<-file.path(output.dir,"umap_integrated_courtney_persample.pdf")
+
+ggsave(
+   filename = output.filepath, 
+   plot = marrangeGrob(fig.list, nrow=1, ncol=1), 
+   width = 6, height = 6
+)
+
+cat("The UMAP of each sample highlighted has been saved as ",output.filepath,"\n",sep="")
+
+#pdf(output.filepath, onefile = TRUE)
+#for (i in seq(length(fig.list))) {
+#  do.call("grid.arrange", fig.list[[i]])  
+#}
+#dev.off()
+```
+#### Integrate using Azimuth
+
+We uploaded the seurat_object_original_allcells.rds onto Azimuth website and map them to the reference human PBMC data. We downloaded the predicted cell types to compare to the predictions by Amy's data.
+```{r eval=FALSE}
+# these are codes downloaded from the Azimuth website as analysis.R codes
+#!/usr/bin/env Rscript
+
+# Ensure Seurat v4.0 or higher is installed
+if (packageVersion(pkg = "Seurat") < package_version(x = "4.0.0")) {
+  stop("Mapping datasets requires Seurat v4 or higher.", call. = FALSE)
+}
+
+# Ensure glmGamPoi is installed
+if (!requireNamespace("glmGamPoi", quietly = TRUE)) {
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    BiocManager::install("glmGamPoi")
+  }
+}
+
+# Ensure Azimuth is installed
+if (packageVersion(pkg = "Azimuth") < package_version(x = "0.3.1")) {
+  stop("Please install azimuth - remotes::install_github('satijalab/azimuth')", call. = FALSE)
+}
+
+library(Seurat)
+library(Azimuth)
+
+# Download the Azimuth reference and extract the archive
+
+# Load the reference
+# Change the file path based on where the reference is located on your system.
+reference <- LoadReference(path = "https://seurat.nygenome.org/azimuth/references/v1.0.0/human_pbmc")
+
+# Load the query object for mapping
+# Change the file path based on where the query file is located on your system.
+query <- LoadFileInput(path = "seurat_object_original_allcells.rds")
+
+# Calculate nCount_RNA and nFeature_RNA if the query does not
+# contain them already
+if (!all(c("nCount_RNA", "nFeature_RNA") %in% c(colnames(x = query[[]])))) {
+    calcn <- as.data.frame(x = Seurat:::CalcN(object = query))
+    colnames(x = calcn) <- paste(
+      colnames(x = calcn),
+      "RNA",
+      sep = '_'
+    )
+    query <- AddMetaData(
+      object = query,
+      metadata = calcn
+    )
+    rm(calcn)
+}
+
+# Calculate percent mitochondrial genes if the query contains genes
+# matching the regular expression "^MT-"
+if (any(grepl(pattern = '^MT-', x = rownames(x = query)))) {
+  query <- PercentageFeatureSet(
+    object = query,
+    pattern = '^MT-',
+    col.name = 'percent.mt',
+    assay = "RNA"
+  )
+}
+
+# Filter cells based on the thresholds for nCount_RNA and nFeature_RNA
+# you set in the app
+cells.use <- query[["nCount_RNA", drop = TRUE]] <= 67269 &
+  query[["nCount_RNA", drop = TRUE]] >= 457 &
+  query[["nFeature_RNA", drop = TRUE]] <= 7761 &
+  query[["nFeature_RNA", drop = TRUE]] >= 300
+
+# If the query contains mitochondrial genes, filter cells based on the
+# thresholds for percent.mt you set in the app
+if ("percent.mt" %in% c(colnames(x = query[[]]))) {
+  cells.use <- cells.use & (query[["percent.mt", drop = TRUE]] <= 100 &
+    query[["percent.mt", drop = TRUE]] >= 0)
+}
+
+# Remove filtered cells from the query
+query <- query[, cells.use]
+
+# Preprocess with SCTransform
+query <- SCTransform(
+  object = query,
+  assay = "RNA",
+  new.assay.name = "refAssay",
+  residual.features = rownames(x = reference$map),
+  reference.SCT.model = reference$map[["refAssay"]]@SCTModel.list$refmodel,
+  method = 'glmGamPoi',
+  ncells = 2000,
+  n_genes = 2000,
+  do.correct.umi = FALSE,
+  do.scale = FALSE,
+  do.center = TRUE
+)
+
+# Find anchors between query and reference
+anchors <- FindTransferAnchors(
+  reference = reference$map,
+  query = query,
+  k.filter = NA,
+  reference.neighbors = "refdr.annoy.neighbors",
+  reference.assay = "refAssay",
+  query.assay = "refAssay",
+  reference.reduction = "refDR",
+  normalization.method = "SCT",
+  features = intersect(rownames(x = reference$map), VariableFeatures(object = query)),
+  dims = 1:50,
+  n.trees = 20,
+  mapping.score.k = 100
+)
+
+# Transfer cell type labels and impute protein expression
+#
+# Transferred labels are in metadata columns named "predicted.*"
+# The maximum prediction score is in a metadata column named "predicted.*.score"
+# The prediction scores for each class are in an assay named "prediction.score.*"
+# The imputed assay is named "impADT" if computed
+
+refdata <- lapply(X = "celltype.l2", function(x) {
+  reference$map[[x, drop = TRUE]]
+})
+names(x = refdata) <- "celltype.l2"
+if (TRUE) {
+  refdata[["impADT"]] <- GetAssayData(
+    object = reference$map[['ADT']],
+    slot = 'data'
+  )
+}
+query <- TransferData(
+  reference = reference$map,
+  query = query,
+  dims = 1:50,
+  anchorset = anchors,
+  refdata = refdata,
+  n.trees = 20,
+  store.weights = TRUE
+)
+
+# Calculate the embeddings of the query data on the reference SPCA
+query <- IntegrateEmbeddings(
+  anchorset = anchors,
+  reference = reference$map,
+  query = query,
+  reductions = "pcaproject",
+  reuse.weights.matrix = TRUE
+)
+
+# Calculate the query neighbors in the reference
+# with respect to the integrated embeddings
+query[["query_ref.nn"]] <- FindNeighbors(
+  object = Embeddings(reference$map[["refDR"]]),
+  query = Embeddings(query[["integrated_dr"]]),
+  return.neighbor = TRUE,
+  l2.norm = TRUE
+)
+
+# The reference used in the app is downsampled compared to the reference on which
+# the UMAP model was computed. This step, using the helper function NNTransform,
+# corrects the Neighbors to account for the downsampling.
+query <- NNTransform(
+  object = query,
+  meta.data = reference$map[[]]
+)
+
+# Project the query to the reference UMAP.
+query[["proj.umap"]] <- RunUMAP(
+  object = query[["query_ref.nn"]],
+  reduction.model = reference$map[["refUMAP"]],
+  reduction.key = 'UMAP_'
+)
+
+
+# Calculate mapping score and add to metadata
+query <- AddMetaData(
+  object = query,
+  metadata = MappingScore(anchors = anchors),
+  col.name = "mapping.score"
+)
+
+# VISUALIZATIONS
+
+# First predicted metadata field, change to visualize other predicted metadata
+id <- "celltype.l2"[1]
+predicted.id <- paste0("predicted.", id)
+
+# DimPlot of the reference
+DimPlot(object = reference$plot, reduction = "refUMAP", group.by = id, label = TRUE) + NoLegend()
+
+# DimPlot of the query, colored by predicted cell type
+DimPlot(object = query, reduction = "proj.umap", group.by = predicted.id, label = TRUE) + NoLegend()
+
+# Plot the score for the predicted cell type of the query
+FeaturePlot(object = query, features = paste0(predicted.id, ".score"), reduction = "proj.umap")
+VlnPlot(object = query, features = paste0(predicted.id, ".score"), group.by = predicted.id) + NoLegend()
+
+# Plot the mapping score
+FeaturePlot(object = query, features = "mapping.score", reduction = "proj.umap")
+VlnPlot(object = query, features = "mapping.score", group.by = predicted.id) + NoLegend()
+
+# Plot the prediction score for the class CD16 Mono
+FeaturePlot(object = query, features = "CD16 Mono", reduction = "proj.umap")
+VlnPlot(object = query, features = "CD16 Mono", group.by = predicted.id) + NoLegend()
+
+# Plot an RNA feature
+FeaturePlot(object = query, features = "GNLY", reduction = "proj.umap")
+VlnPlot(object = query, features = "GNLY", group.by = predicted.id) + NoLegend()
+
+# Plot an imputed protein feature
+if (TRUE) {
+  FeaturePlot(object = query, features = "CD3-1", reduction = "proj.umap")
+  VlnPlot(object = query, features = "CD3-1", group.by = predicted.id) + NoLegend()
+}
+
+```
+
+We load in the predicted cell types by Azimuth so that it can be compared to the annotations based on Amy's data.
+```{r}
+# load in the predicted cell types by Azimuth
+azimuth.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA-seq/Seurat/azimuth/azimuth_pred.tsv"
+azimuth.pred<-read_tsv(azimuth.filepath)
+azimuth.pred<-as.data.frame(azimuth.pred)
+rownames(azimuth.pred)<-as.character(azimuth.pred[,1])
+```
+
+#### Integrate with Amy's data
 
 We obtained another PBMC 10X data annotated in Kaminski lab so that we can integrate this dataset with the annotated data to annotate the cells in this dataset. The seurat object containing the annotated PBMC 10x data is under /home/xy48/scratch_palmer/Amy_PBMC on grace hpc. We ran this section of codes on hpc.
 
-## data loading
+##### data loading
 
 We first load in the annotated PBMC 10x data from Amy.
-```{r}
+```{r fig.width=10,fig.height=10}
+my.distinct.colors<-c('#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000')
+
 data.filepath<-"/home/yanxiting/driver_Grace/scratch_palmer/Amy_PBMC/01.03.23.controls.for.Xiting.rds"
 amy.10x<-readRDS(data.filepath,refhook = NULL)
+amy.10x<-subset(amy.10x,cells= rownames(amy.10x@meta.data)[!is.na(amy.10x@meta.data$SampleID)])
+temp.num<-as.matrix(table(amy.10x@meta.data$SampleID))[,1]
+amy.10x<-subset(amy.10x,cells=rownames(amy.10x@meta.data)[amy.10x@meta.data$SampleID%in%names(temp.num)[temp.num>=700]])
+
+DefaultAssay(amy.10x)<-"integrated"
+DimPlot(amy.10x, reduction = "umap",group.by="Annotation_090822",cols = my.distinct.colors)
+DimPlot(amy.10x, reduction = "umap",group.by="SampleID",cols = my.distinct.colors)
 ```
 
+We then load in the integrated seurat object of our data.
+
+```{r}
+data.filepath<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC/scRNA-seq/Seurat/integrated_analysis/seurat_object_integrated_allcells_cellclustering_noSingleR.rds"
+sample1.combined<-readRDS(data.filepath,refhook=NULL)
+# focus on samples with >=700 cells in total
+temp.num<-as.matrix(table(sample1.combined@meta.data$sample.names))[,1]
+sample1.combined<-subset(sample1.combined,cells=rownames(sample1.combined@meta.data)[sample1.combined@meta.data$sample.names%in%names(temp.num)[temp.num>=700]])
+```
+
+##### Merge counts
+Merge the raw count data from these two sources for integration analysis.
+
+```{r}
+temp.names<-intersect(rownames(sample1.combined@assays$RNA@counts),rownames(amy.10x@assays$RNA@counts))
+merged.counts<-cbind(sample1.combined@assays$RNA@counts[temp.names,],amy.10x@assays$RNA@counts[temp.names,])
+merged.metadata<-rbind(as.matrix(sample1.combined@meta.data[,c("disease","sample.names")]),as.matrix(amy.10x@meta.data[,c("disease","sampleID")]))
+temp<-c(rep(NA,nrow(sample1.combined@meta.data)),amy.10x@meta.data$Annotation_090822)
+merged.metadata<-cbind(merged.metadata,temp)
+colnames(merged.metadata)[3]<-"Annotation_090822"
+temp.pred<-c(rep(NA,nrow(sample1.combined@meta.data)),rep(NA,nrow(amy.10x@meta.data)))
+names(temp.pred)<-c(rownames(sample1.combined@meta.data),rownames(amy.10x@meta.data))
+temp.names<-intersect(rownames(sample1.combined@meta.data),rownames(azimuth.pred))
+temp.pred[temp.names]<-azimuth.pred[temp.names,"predicted.celltype.l2"]
+
+merged.metadata<-cbind(merged.metadata,temp.pred)
+colnames(merged.metadata)[4]<-"Annotation_azimuth"
+
+merged.data<-CreateSeuratObject(counts=merged.counts,project="MergedSeuratObject",assay="RNA",min.cells=3,min.features = 200)
+merged.data[["percent.mt"]] <- PercentageFeatureSet(merged.data, pattern = "^MT-")
+
+cat("\n")
+cat("Originally, there are ",nrow(merged.counts)," genes and ",ncol(merged.counts)," cells in the data.\n",sep="")
+cat("After the first step filtering, there are ",nrow(merged.data@assays$RNA@data)," genes and ",ncol(merged.data@assays$RNA@data)," cells in the filtered data.\n",sep="")
+
+rm(merged.counts)
+#gc(verbose=F)
+invisible(gc())
+
+
+merged.data <- AddMetaData(object = merged.data, metadata = merged.metadata[,"disease"], col.name = "disease")
+merged.data <- AddMetaData(object = merged.data, metadata = merged.metadata[,"sample.names"], col.name = "sample.names")
+merged.data <- AddMetaData(object = merged.data, metadata = merged.metadata[,"Annotation_090822"], col.name = "Annotation_090822")
+merged.data <- AddMetaData(object = merged.data, metadata = merged.metadata[,"Annotation_azimuth"], col.name = "Annotation_azimuth")
+temp<-rep("",nrow(merged.data@meta.data))
+temp[substr(merged.data@meta.data$sample.names,1,1)=="G"]<-"courtney"
+temp[substr(merged.data@meta.data$sample.names,1,1)=="C"]<-"amy"
+merged.data <- AddMetaData(object = merged.data, metadata = temp, col.name = "study")
+
+```
+
+##### integration analysis
+Split the whole dataset based on subject ID. Find anchors to integrate all the datasets together.
+
+```{r}
+sample1.raw<-merged.data
+sample1.list<-SplitObject(sample1.raw,split.by="study")
+#sample1.list<-SplitObject(sample1.raw,split.by="sample.names")
+sample1.list<-lapply(X=sample1.list,FUN=function(x){
+  x<-NormalizeData(x)
+  x<-FindVariableFeatures(x,selection.method="vst",nfeatures=2000)
+})
+temp.cellnum<-unlist(lapply(sample1.list,ncol))
+
+# increase the global maxSize
+options(future.globals.maxSize= 40194304000)
+features <- SelectIntegrationFeatures(object.list = sample1.list)
+sample1.list <- lapply(X = sample1.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features =features, npcs=40,verbose=F)
+})
+#sample1.anchors<-FindIntegrationAnchors(sample1.list[temp.cellnum>=92],k.filter=92,dims=1:40,verbose=FALSE)
+sample1.anchors<-FindIntegrationAnchors(object.list=sample1.list,anchor.features=features, reduction="rpca",verbose=FALSE)
+# reference=c(1,2): https://satijalab.org/seurat/archive/v3.2/integration.html
+#sample1.combined<-IntegrateData(anchorset=sample1.anchors,features.to.integrate=rownames(sample1.raw@assays$RNA@counts),dims=1:40,verbose=FALSE)
+#,k.filter=40,dims=1:40
+merged.combined<-IntegrateData(anchorset=sample1.anchors,verbose=FALSE)
+
+```
+
+
+
+##### cell clustering
+Cluster the cells using the integrated data.
+
+```{r}
+DefaultAssay(merged.combined) <- "integrated"
+# Run the standard workflow for visualization and clustering
+merged.combined <- ScaleData(merged.combined, verbose = FALSE)
+merged.combined <- RunPCA(merged.combined, npcs = 40, verbose = FALSE)
+# t-SNE and Clustering
+merged.combined <- RunUMAP(merged.combined, reduction = "pca", dims = 1:40)
+merged.combined <- FindNeighbors(merged.combined, reduction = "pca", dims = 1:40)
+merged.combined <- FindClusters(merged.combined, resolution = 1.2)
+```
+##### data saving
+We save the result in a rds file.
+```{r}
+home.dir<-"/home/yanxiting/Documents/Research/GRADS_SARC_PBMC"
+output.dir<-file.path(home.dir,"scRNA-seq/Seurat")
+temp<-file.path(output.dir,"integrated_amy")
+if(file.exists(temp)==F){
+  dir.create(temp)
+}
+output.filepath<-file.path(output.dir,"integrated_amy","seurat_object_integrated_merged_study.rds")
+saveRDS(merged.combined,file=output.filepath)
+cat("We saved the integrated data based on studies for all cells as ",output.filepath,"\n",sep="")
+output.filepath<-file.path(output.dir,"integrated_amy","seurat_object_original_merged_study.rds")
+saveRDS(merged.data,file=output.filepath)
+cat("We saved the original merged count matrix based on studies for all cells as ",output.filepath,"\n",sep="")
+```
+
+
+##### visualization
+
+Generate UMAPs of the Courtney and Amy datasets to compare the cell types predicted by Azimuth and by Amy.
+```{r,fig.width=10,fig.height=10}
+library(cowplot)
+library(randomcoloR)
+n <- 31
+temp.colors.31 <- distinctColorPalette(n)
+
+temp.ct<-merged.combined@meta.data$Annotation_090822
+temp.ct[is.na(temp.ct)]<-merged.combined@meta.data$Annotation_azimuth[is.na(temp.ct)]
+merged.combined<-AddMetaData(merged.combined,metadata=temp.ct,col.name="ct.pred")
+
+p1<-DimPlot(merged.combined, reduction = "umap", cells=rownames(merged.combined@meta.data)[merged.combined@meta.data$study=="courtney"],group.by="ct.pred",shuffle = TRUE,cols = temp.colors.31)+labs(title = "Courtney (Azimuth)")
+p2<-DimPlot(merged.combined, reduction = "umap", cells=rownames(merged.combined@meta.data)[merged.combined@meta.data$study=="amy"],group.by="ct.pred",shuffle=TRUE,cols = temp.colors.31)+labs(title = "Amy (Annotated)")
+
+#DimPlot(merged.combined, reduction = "umap", group.by="sample.names",label = TRUE,split.by="study")
+#DimPlot(merged.combined, reduction = "umap", group.by="Annotation_090822", label = TRUE,cols=my.distinct.colors,split.by="study")
+#p4<-DimPlot(merged.combined, reduction = "umap", group.by="singler.hpca.cluster", label = TRUE,cols=my.distinct.colors)
+#p5<-DimPlot(merged.combined, reduction = "umap", group.by="disease", label = TRUE,cols=my.distinct.colors)
+grid.arrange(p1,p2,ncol=1)
+```
+
+```{r,fig.width=10,fig.height=14}
+p1<-DimPlot(merged.combined, reduction = "umap", cells=rownames(merged.combined@meta.data)[merged.combined@meta.data$study=="courtney"],group.by="ct.pred",shuffle = TRUE,cols = temp.colors.31,label = TRUE)+labs(title = "Courtney (Azimuth)")
+p2<-DimPlot(merged.combined, reduction = "umap", cells=rownames(merged.combined@meta.data)[merged.combined@meta.data$study=="amy"],group.by="ct.pred",shuffle=TRUE,cols = temp.colors.31,label=TRUE)+labs(title = "Amy (Annotated)")
+
+#DimPlot(merged.combined, reduction = "umap", group.by="sample.names",label = TRUE,split.by="study")
+#DimPlot(merged.combined, reduction = "umap", group.by="Annotation_090822", label = TRUE,cols=my.distinct.colors,split.by="study")
+#p4<-DimPlot(merged.combined, reduction = "umap", group.by="singler.hpca.cluster", label = TRUE,cols=my.distinct.colors)
+#p5<-DimPlot(merged.combined, reduction = "umap", group.by="disease", label = TRUE,cols=my.distinct.colors)
+grid.arrange(p1,p2,ncol=1)
+```
+
+#old
 Visualize the integrated data by splitting it to different clusters.
 
 ```{r,fig.width=10,fig.height=50}
@@ -781,7 +1223,6 @@ for(i in 1:length(celltype.names)){
   #fig.list[[2*i]]<-DimPlot(sample1.combined, reduction = "umap", label = FALSE,group.by="temp.map",cols=c(my.distinct.colors[i],"grey"))
   fig.list[[2*i]]<-DimPlot(sample1.combined, reduction = "umap", label = FALSE,group.by="temp.map",cols=c("red","grey"))
 }
-
 do.call(grid.arrange,c(fig.list,ncol=2))
 ```
 
@@ -800,5 +1241,69 @@ for(i in 1:length(celltype.names)){
 do.call(grid.arrange,c(fig.list,ncol=2))
 ```
 
+#### Cell typing using SingleR annotation
+
+We run SingleR (v 1.2.0) again based on the clustering results based on the integrated data and visualize the data using the new cell typing annotation.
+
+```{r fig.width=12,fig.height=8}
+# run SingleR with HPCA as reference dataset.
+library(SingleR)
+library(scRNAseq)
+library(scater)
+hpca.se <- HumanPrimaryCellAtlasData()
+hpca.se
+#hESCs <- LaMannoBrainData('human-es')
+my.temp<-CreateSeuratObject(counts=sample1.combined@assays$RNA@counts,project = "ChuppSputum",min.cells = 0,  min.features = 0)
+temp<-as.SingleCellExperiment(my.temp,assay="RNA")
+temp<-logNormCounts(temp)
+sample1.singler.hpca<-SingleR(test=temp,ref=hpca.se,labels=hpca.se$label.fine,method="cluster",clusters=as.character(Idents(sample1.combined)))
+plotScoreHeatmap(sample1.singler.hpca)
+```
+
+
+Data visulization labelled by the new SingleR results on the combined data.
+```{r}
+cluster.names<-rownames(sample1.singler.hpca)
+cluster.labels<-sample1.singler.hpca$pruned.labels
+temp.map<-as.character(Idents(sample1.combined))
+temp.map<-plyr::mapvalues(x=temp.map,from=cluster.names,to=cluster.labels)
+sample1.combined<-AddMetaData(sample1.combined,metadata=temp.map,col.name="singler.hpca.cluster.combined")
+```
+
+
+Get the main cell type labels and save the annotated seurat R object.
+```{r}
+# get the main labels
+my.temp<-CreateSeuratObject(counts=sample1.combined@assays$RNA@counts,project = "ChuppSputum",min.cells = 0,  min.features = 0)
+temp<-as.SingleCellExperiment(my.temp,assay="RNA")
+temp<-logNormCounts(temp)
+sample1.singler.hpca<-SingleR(test=temp,ref=hpca.se,labels=hpca.se$label.main,method="cluster",clusters=as.character(Idents(sample1.combined)))
+plotScoreHeatmap(sample1.singler.hpca)
+```
+
+
+```{r}
+cluster.names<-rownames(sample1.singler.hpca)
+cluster.labels<-sample1.singler.hpca$pruned.labels
+temp.map<-as.character(Idents(sample1.combined))
+temp.map<-plyr::mapvalues(x=temp.map,from=cluster.names,to=cluster.labels)
+sample1.combined<-AddMetaData(sample1.combined,metadata=temp.map,col.name="singler.hpca.cluster.main.combined")
+output.filepath<-file.path(output.subdir,"seurat_object_integrated_allcells_cellclustering_singler_hpca.rds")
+saveRDS(sample1.combined,file=output.filepath)
+```
+
+Visulizing the SingleR cell typing results on the combined UMAP.
+```{r,fig.width=14,fig.height=24}
+fig.list<-list()
+celltype.names<-unique(as.character(sample1.combined@meta.data$singler.hpca.cluster.combined))
+celltype.names<-sort(celltype.names,decreasing=T)
+for(i in 1:length(celltype.names)){
+  temp.map<-as.character(sample1.combined@meta.data$singler.hpca.cluster.combined)
+  temp.map[temp.map!=celltype.names[i]]<-"zother"
+  sample1.combined@meta.data$temp.map<-temp.map
+  fig.list[[i]]<-DimPlot(sample1.combined, reduction = "umap",group.by="temp.map",label = FALSE,pt.size=0.5,cols=c(my.distinct.colors[i],"grey"))
+}
+do.call(grid.arrange,c(fig.list,ncol=2))
+```
 
 
